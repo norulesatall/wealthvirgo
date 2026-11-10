@@ -1,0 +1,6 @@
+{
+  "name": "Wealth Virgo",
+  "description": "Comprehensive financial planning and retirement projection application with multi-currency support and real-time exchange rates.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
