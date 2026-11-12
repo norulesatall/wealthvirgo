@@ -1,3 +1,0 @@
-# Cloudflare Pages SPA rewrite rule
-# Direct all non-file route requests to index.html with a 200 status
-/*    /index.html   200
