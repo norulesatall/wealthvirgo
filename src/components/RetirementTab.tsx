@@ -1,19 +1,12 @@
 import React, { useState, useMemo } from 'react';
 import { 
-  History, 
   DollarSign, 
-  TrendingUp, 
-  Shield, 
   Plus, 
   Trash2, 
   Pencil, 
   X, 
   Check, 
-  Calendar,
-  Sparkles,
-  HelpCircle,
-  Clock,
-  Compass
+  Sparkles
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FinancialState, RetirementExpense, CURRENCIES, formatCurrency, safeFloat } from '../types/finance';
@@ -76,17 +69,6 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
   // SWR Nest Egg Calculation
   const swrRate = data.safeWithdrawalRate || 4.0;
   const targetNestEgg = swrRate > 0 ? (annualRetirementBudget / (swrRate / 100)) + totalLumpSumRetirement : 0;
-  
-  // Real retirement pool from projection engine if available
-  const projectedRetirementPool = useMemo(() => {
-    if (projection && projection.yearlyData) {
-      const retired = projection.yearlyData.find((d: any) => d.age === data.retirementAge);
-      if (retired) return retired.real;
-    }
-    return 0;
-  }, [projection, data.retirementAge]);
-
-  const fundingRatio = targetNestEgg > 0 ? (projectedRetirementPool / targetNestEgg) * 100 : 0;
 
   // Handlers for Recurring
   const handleSaveRecurring = (e: React.FormEvent) => {
@@ -179,9 +161,6 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
     if (editingLumpId === id) cancelEditLump();
   };
 
-  const yearsToRetirement = Math.max(0, (data.retirementAge || 65) - (data.currentAge || 30));
-  const retirementHorizonYears = Math.max(0, (data.lifeExpectancy || 90) - (data.retirementAge || 65));
-
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
       {/* Header & Conversational Premise */}
@@ -194,7 +173,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
               <span className={`text-[11px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
-                Step 4 · Freedom Blueprint
+                Step 5 · Freedom Blueprint
               </span>
               <span className="text-slate-400">·</span>
               <span className="text-xs text-slate-500">Retirement Strategy</span>
@@ -205,7 +184,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
               What does your dream retirement look like?
             </h2>
             <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
-              Design when you step away from work, the monthly lifestyle budget you need, extra bucket-list dreams, and the Safe Withdrawal Rate (SWR) you will use to protect your assets.
+              Design the monthly lifestyle budget you need and any extra bucket-list dreams or reserves starting at age <strong>{data.retirementAge}</strong>.
             </p>
           </div>
 
@@ -228,135 +207,10 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
         </div>
       </div>
 
-      {/* QUESTION 1: RETIREMENT TIMELINE & PARAMETERS */}
-      <section className={`p-6 md:p-8 rounded-3xl border transition-colors ${
-        isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-      }`}>
-        <div className="flex items-center gap-2 mb-4">
-          <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-            <Clock size={18} />
-          </div>
-          <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            Question 1: When do you plan to retire and what is your horizon?
-          </h3>
-        </div>
-        <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} mb-6 max-w-3xl leading-relaxed`}>
-          Set your key milestones. Your working earnings and pre-retirement expenses automatically shift into your retirement lifestyle budget at age <strong>{data.retirementAge}</strong>.
-        </p>
-
-        {/* Visual Timeline Bar */}
-        <div className={`p-4 rounded-2xl border mb-6 ${
-          isDark ? 'bg-slate-950/50 border-slate-800' : 'bg-slate-50 border-slate-200'
-        }`}>
-          <div className="flex justify-between items-center text-xs font-semibold mb-2">
-            <span className="text-slate-500">Age {data.currentAge} (Today)</span>
-            <span className="text-indigo-400 font-bold">Age {data.retirementAge} (Freedom Day)</span>
-            <span className="text-slate-500">Age {data.lifeExpectancy} (Life Expectancy)</span>
-          </div>
-
-          <div className="h-3 rounded-full overflow-hidden flex bg-slate-800">
-            <div 
-              className="bg-indigo-600 transition-all duration-300" 
-              style={{ width: `${Math.max(5, (yearsToRetirement / (data.lifeExpectancy - data.currentAge)) * 100)}%` }}
-              title={`Working Phase: ${yearsToRetirement} years`}
-            />
-            <div 
-              className="bg-emerald-500 transition-all duration-300 flex-1" 
-              title={`Retirement Phase: ${retirementHorizonYears} years`}
-            />
-          </div>
-
-          <div className="flex justify-between items-center text-[11px] text-slate-500 mt-2 font-mono tabular-nums">
-            <span>🚀 {yearsToRetirement} years of wealth building</span>
-            <span>🌴 {retirementHorizonYears} years of retirement living</span>
-          </div>
-        </div>
-
-        {/* 4 Core Parameter Inputs */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/40 border-slate-800' : 'bg-white border-slate-200'}`}>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-              Current Age
-            </label>
-            <div className="flex items-center justify-between">
-              <input
-                type="number"
-                min="18"
-                max="80"
-                value={data.currentAge}
-                onChange={(e) => updateData('currentAge', parseInt(e.target.value) || 30)}
-                className={`w-20 text-lg font-bold font-mono tabular-nums bg-transparent outline-none ${
-                  isDark ? 'text-white' : 'text-slate-900'
-                }`}
-              />
-              <span className="text-xs text-slate-400">years old</span>
-            </div>
-          </div>
-
-          <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/40 border-slate-800' : 'bg-white border-slate-200'}`}>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-              Target Retirement Age
-            </label>
-            <div className="flex items-center justify-between">
-              <input
-                type="number"
-                min={data.currentAge}
-                max="90"
-                value={data.retirementAge}
-                onChange={(e) => updateData('retirementAge', parseInt(e.target.value) || 60)}
-                className={`w-20 text-lg font-bold font-mono tabular-nums bg-transparent outline-none ${
-                  isDark ? 'text-indigo-400' : 'text-indigo-600'
-                }`}
-              />
-              <span className="text-xs text-slate-400">years old</span>
-            </div>
-          </div>
-
-          <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/40 border-slate-800' : 'bg-white border-slate-200'}`}>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-              Life Expectancy
-            </label>
-            <div className="flex items-center justify-between">
-              <input
-                type="number"
-                min={data.retirementAge}
-                max="110"
-                value={data.lifeExpectancy}
-                onChange={(e) => updateData('lifeExpectancy', parseInt(e.target.value) || 90)}
-                className={`w-20 text-lg font-bold font-mono tabular-nums bg-transparent outline-none ${
-                  isDark ? 'text-white' : 'text-slate-900'
-                }`}
-              />
-              <span className="text-xs text-slate-400">years old</span>
-            </div>
-          </div>
-
-          <div className={`p-4 rounded-2xl border ${isDark ? 'bg-slate-950/40 border-slate-800' : 'bg-white border-slate-200'}`}>
-            <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1">
-              Post-Retirement Return
-            </label>
-            <div className="flex items-center justify-between">
-              <input
-                type="number"
-                step="0.1"
-                min="0"
-                max="15"
-                value={data.postRetirementReturn}
-                onChange={(e) => updateData('postRetirementReturn', parseFloat(e.target.value) || 4.0)}
-                className={`w-20 text-lg font-bold font-mono tabular-nums bg-transparent outline-none ${
-                  isDark ? 'text-emerald-400' : 'text-emerald-600'
-                }`}
-              />
-              <span className="text-xs text-slate-400">% / year</span>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* QUESTION 2 & 3: RECURRING BUDGET & LUMP SUMS */}
+      {/* QUESTION 1 & 2: RECURRING BUDGET & LUMP SUMS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
         
-        {/* ================= QUESTION 2: RECURRING LIFESTYLE BUDGET ================= */}
+        {/* ================= QUESTION 1: RECURRING LIFESTYLE BUDGET ================= */}
         <section className={`p-6 md:p-8 rounded-3xl border flex flex-col transition-colors ${
           isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
         }`}>
@@ -366,7 +220,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
                 <DollarSign size={18} />
               </div>
               <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                Question 2: What monthly lifestyle budget will give you peace of mind?
+                Question 1: What monthly lifestyle budget will give you peace of mind?
               </h3>
             </div>
             <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
@@ -550,7 +404,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
           </div>
         </section>
 
-        {/* ================= QUESTION 3: LUMP SUM DREAMS & BUFFERS ================= */}
+        {/* ================= QUESTION 2: LUMP SUM DREAMS & BUFFERS ================= */}
         <section className={`p-6 md:p-8 rounded-3xl border flex flex-col transition-colors ${
           isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
         }`}>
@@ -560,7 +414,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
                 <Sparkles size={18} />
               </div>
               <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                Question 3: Any extra bucket-list dreams or healthcare buffers?
+                Question 2: Any extra bucket-list dreams or healthcare buffers?
               </h3>
             </div>
             <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
@@ -725,98 +579,6 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
         </section>
 
       </div>
-
-      {/* QUESTION 4: SAFE WITHDRAWAL RATE (SWR) */}
-      <section className={`p-6 md:p-8 rounded-3xl border transition-colors ${
-        isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
-      }`}>
-        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6 mb-6">
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
-              <div className={`p-2 rounded-xl ${isDark ? 'bg-sky-500/10 text-sky-400' : 'bg-sky-50 text-sky-600'}`}>
-                <Shield size={18} />
-              </div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-                Question 4: What Safe Withdrawal Rate (SWR) do you plan to use?
-              </h3>
-            </div>
-            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed max-w-2xl`}>
-              The Safe Withdrawal Rate determines how much of your total nest egg you can spend each year without exhausting your capital over a 30+ year horizon.
-            </p>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <span className="text-3xl font-black font-mono tabular-nums text-indigo-500">
-              {swrRate.toFixed(1)}%
-            </span>
-            <span className="text-xs text-slate-500 font-semibold uppercase tracking-wider">
-              Annual SWR
-            </span>
-          </div>
-        </div>
-
-        {/* Interactive Slider */}
-        <div className="space-y-4">
-          <input
-            type="range"
-            min="1.0"
-            max="8.0"
-            step="0.1"
-            value={swrRate}
-            onChange={(e) => updateData('safeWithdrawalRate', parseFloat(e.target.value) || 4.0)}
-            className="w-full h-2 bg-slate-700 rounded-lg appearance-none cursor-pointer accent-indigo-600"
-          />
-
-          <div className="flex justify-between text-[11px] text-slate-500 font-mono tabular-nums">
-            <span>Conservative (2.5% - 3.0%)</span>
-            <span className="text-indigo-400 font-bold">Trinity Rule (4.0%)</span>
-            <span>Aggressive (5.0%+)</span>
-          </div>
-        </div>
-
-        {/* Real Math Evaluation Box */}
-        <div className={`mt-6 p-5 rounded-2xl border grid grid-cols-1 md:grid-cols-3 gap-6 ${
-          isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200'
-        }`}>
-          <div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">
-              Annual Core Expenses
-            </span>
-            <span className="text-lg font-bold font-mono tabular-nums">
-              {formatCurrency(annualRetirementBudget, data.baseCurrency)} / yr
-            </span>
-            <span className="text-[11px] text-slate-500 block mt-1">Based on Question 2 budget</span>
-          </div>
-
-          <div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">
-              Required SWR Nest Egg
-            </span>
-            <span className="text-lg font-bold font-mono tabular-nums text-indigo-500">
-              {formatCurrency(targetNestEgg, data.baseCurrency)}
-            </span>
-            <span className="text-[11px] text-slate-500 block mt-1">
-              {formatCurrency(annualRetirementBudget, data.baseCurrency)} ÷ {swrRate}%
-            </span>
-          </div>
-
-          <div>
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block mb-1">
-              Projected Pool at Age {data.retirementAge}
-            </span>
-            <span className={`text-lg font-bold font-mono tabular-nums ${
-              fundingRatio >= 100 ? 'text-emerald-500' : 'text-amber-500'
-            }`}>
-              {projectedRetirementPool > 0 ? formatCurrency(projectedRetirementPool, data.baseCurrency) : 'Run simulation'}
-            </span>
-            <span className="text-[11px] text-slate-500 block mt-1">
-              {projectedRetirementPool > 0 
-                ? `${fundingRatio.toFixed(0)}% of target nest egg` 
-                : 'Check Dashboard tab for full projection'}
-            </span>
-          </div>
-        </div>
-      </section>
     </div>
   );
 }

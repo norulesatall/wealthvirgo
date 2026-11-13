@@ -347,7 +347,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
               <span className={`text-[11px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
-                Step 2 · Wealth Architecture
+                Step 3 · Wealth Architecture
               </span>
               <span className="text-slate-400">·</span>
               <span className="text-xs text-slate-500">3 Comprehensive Scenarios</span>

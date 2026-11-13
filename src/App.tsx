@@ -41,6 +41,8 @@ import PortfolioTab from './components/PortfolioTab';
 import GoalsTab from './components/GoalsTab';
 import RetirementTab from './components/RetirementTab';
 
+const logoImg = '/wealth_virgo_logo.jpg';
+
 // Register Chart.js components
 Chart.register(...registerables);
 
@@ -81,7 +83,7 @@ const formatCurrency = (amount: number, currency: string) => {
 
 export default function App() {
   // --- STATE ---
-  const [activeTab, setActiveTab] = useState('guide');
+  const [activeTab, setActiveTab] = useState('profile');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [passwordModal, setPasswordModal] = useState<{ type: 'encrypt' | 'decrypt', fileData?: string } | null>(null);
   const [tempPassword, setTempPassword] = useState('');
@@ -515,9 +517,12 @@ export default function App() {
         <div className="flex items-center justify-between mb-10">
           <div className="flex items-center space-x-2.5">
             <img 
-              src="/wealth_virgo_logo.jpg" 
+              src={logoImg} 
               alt="Wealth Virgo" 
-              className="w-10 h-10 rounded-xl object-cover shadow-sm" 
+              className="w-10 h-10 rounded-xl object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = '/wealth_virgo_logo.jpg';
+              }}
               referrerPolicy="no-referrer"
             />
             <span className={`font-bold text-2xl tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Wealth Virgo</span>
@@ -529,12 +534,12 @@ export default function App() {
         
         <nav className="space-y-1 flex-1 overflow-y-auto overscroll-contain">
           {[
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+            { id: 'profile', icon: Settings, label: 'Parameters' },
             { id: 'cashflow', icon: DollarSign, label: 'Cash Flow' },
             { id: 'portfolio', icon: Briefcase, label: 'Portfolio' },
             { id: 'goals', icon: TrendingUp, label: 'Goals' },
             { id: 'retirement', icon: History, label: 'Retirement' },
-            { id: 'profile', icon: Settings, label: 'Parameters' }
+            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' }
           ].map(item => (
             <button
               id={`nav-${item.id}`}
@@ -598,9 +603,12 @@ export default function App() {
            <button onClick={() => setIsMobileMenuOpen(true)} className={`p-2 ${theme === 'dark' ? 'bg-slate-800' : 'bg-slate-100'} rounded-xl`}><Menu size={20} /></button>
            <div className="flex items-center space-x-2">
              <img 
-               src="/wealth_virgo_logo.jpg" 
+               src={logoImg} 
                alt="Wealth Virgo" 
-               className="w-6 h-6 rounded-md object-cover" 
+               className="w-7 h-7 rounded-lg object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
+               onError={(e) => {
+                 (e.currentTarget as HTMLImageElement).src = '/wealth_virgo_logo.jpg';
+               }}
                referrerPolicy="no-referrer"
              />
              <span className={`font-bold text-lg ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Wealth Virgo</span>
@@ -2187,9 +2195,12 @@ function Footer({ theme }: { theme: 'light' | 'dark' }) {
         <div className="lg:col-span-4 space-y-4">
           <div className="flex items-center space-x-2.5">
             <img 
-              src="/wealth_virgo_logo.jpg" 
+              src={logoImg} 
               alt="Wealth Virgo" 
-              className="w-10 h-10 rounded-xl object-cover shadow-sm" 
+              className="w-10 h-10 rounded-xl object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
+              onError={(e) => {
+                (e.currentTarget as HTMLImageElement).src = '/wealth_virgo_logo.jpg';
+              }}
               referrerPolicy="no-referrer"
             />
             <span className={`font-black text-base tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
@@ -2257,25 +2268,52 @@ function Footer({ theme }: { theme: 'light' | 'dark' }) {
 }
 
 function ProfileTab({ data, updateData, theme }: { data: any, updateData: any, theme: 'light' | 'dark' }) {
+  const isDark = theme === 'dark';
 
   return (
-    <div className="max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-8">
-      <div className={`${theme === 'dark' ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300`}>
-        <h3 className={`text-lg font-bold mb-8 flex items-center gap-3 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-          <Settings size={22} className="text-indigo-500" /> Timeline Parameters
-        </h3>
-        <ParameterInput label="Current Age" help="Your age at the start of the projection." value={data.currentAge} min={18} max={80} step={1} suffix=" yrs" onChange={(v: number) => updateData('currentAge', v)} theme={theme} />
-        <ParameterInput label="Retirement Age" help="The age at which you plan to stop working and start living off your assets." value={data.retirementAge} min={data.currentAge} max={90} step={1} suffix=" yrs" onChange={(v: number) => updateData('retirementAge', v)} theme={theme} />
-        <ParameterInput label="Life Expectancy" help="The final age used for the projection. Calculations will run until this year." value={data.lifeExpectancy} min={data.retirementAge} max={110} step={1} suffix=" yrs" onChange={(v: number) => updateData('lifeExpectancy', v)} theme={theme} />
+    <div className="space-y-8 max-w-7xl mx-auto">
+      <div className={`p-6 md:p-8 rounded-3xl border transition-colors ${
+        isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+      }`}>
+        <div className="space-y-2 max-w-2xl">
+          <div className="flex items-center gap-2">
+            <span className={`text-[11px] font-black uppercase tracking-widest ${
+              isDark ? 'text-indigo-400' : 'text-indigo-600'
+            }`}>
+              Step 1 · Baseline Parameters
+            </span>
+            <span className="text-slate-400">·</span>
+            <span className="text-xs text-slate-500">Ages {data.currentAge} to {data.lifeExpectancy}</span>
+          </div>
+          <h2 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
+            isDark ? 'text-white' : 'text-slate-900'
+          }`}>
+            What is your timeline and economic outlook?
+          </h2>
+          <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+            Configure your age milestones, expected inflation, income growth, post-retirement yield, and Safe Withdrawal Rate (SWR) to power every projection across your plan.
+          </p>
+        </div>
       </div>
-      <div className={`${theme === 'dark' ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300`}>
-        <h3 className={`text-lg font-bold mb-8 flex items-center gap-3 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-          <TrendingUp size={22} className="text-emerald-500" /> Economic Forecast
-        </h3>
-        <ParameterInput label="Annual Inflation Rate" help="The expected annual increase in the cost of living. Default is 2.5%." value={data.inflationRate} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('inflationRate', v)} theme={theme} />
-        <ParameterInput label="Income Growth (Pre-Retirement)" help="The annual percentage increase you expect in your income streams." value={data.incomeGrowthRate} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('incomeGrowthRate', v)} theme={theme} />
-        <ParameterInput label="Portfolio Return (Post-Retirement)" help="Expected annual yield on your combined wealth after you retire." value={data.postRetirementReturn} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('postRetirementReturn', v)} theme={theme} />
-        <ParameterInput label="Safe Withdrawal Rate (SWR)" help="The annual percentage of your retirement nest egg that you plan to withdraw each year. Default is 4.0%." value={data.safeWithdrawalRate || 4.0} min={1} max={10} step={0.1} suffix="%" onChange={(v: number) => updateData('safeWithdrawalRate', v)} theme={theme} />
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className={`${isDark ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300`}>
+          <h3 className={`text-lg font-bold mb-8 flex items-center gap-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            <Settings size={22} className="text-indigo-500" /> Timeline Parameters
+          </h3>
+          <ParameterInput label="Current Age" help="Your age at the start of the projection." value={data.currentAge} min={18} max={80} step={1} suffix=" yrs" onChange={(v: number) => updateData('currentAge', v)} theme={theme} />
+          <ParameterInput label="Retirement Age" help="The age at which you plan to stop working and start living off your assets." value={data.retirementAge} min={data.currentAge} max={90} step={1} suffix=" yrs" onChange={(v: number) => updateData('retirementAge', v)} theme={theme} />
+          <ParameterInput label="Life Expectancy" help="The final age used for the projection. Calculations will run until this year." value={data.lifeExpectancy} min={data.retirementAge} max={110} step={1} suffix=" yrs" onChange={(v: number) => updateData('lifeExpectancy', v)} theme={theme} />
+        </div>
+        <div className={`${isDark ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300`}>
+          <h3 className={`text-lg font-bold mb-8 flex items-center gap-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+            <TrendingUp size={22} className="text-emerald-500" /> Economic Forecast
+          </h3>
+          <ParameterInput label="Annual Inflation Rate" help="The expected annual increase in the cost of living. Default is 2.5%." value={data.inflationRate} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('inflationRate', v)} theme={theme} />
+          <ParameterInput label="Income Growth (Pre-Retirement)" help="The annual percentage increase you expect in your income streams." value={data.incomeGrowthRate} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('incomeGrowthRate', v)} theme={theme} />
+          <ParameterInput label="Portfolio Return (Post-Retirement)" help="Expected annual yield on your combined wealth after you retire." value={data.postRetirementReturn} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('postRetirementReturn', v)} theme={theme} />
+          <ParameterInput label="Safe Withdrawal Rate (SWR)" help="The annual percentage of your retirement nest egg that you plan to withdraw each year. Default is 4.0%." value={data.safeWithdrawalRate || 4.0} min={1} max={10} step={0.1} suffix="%" onChange={(v: number) => updateData('safeWithdrawalRate', v)} theme={theme} />
+        </div>
       </div>
     </div>
   );

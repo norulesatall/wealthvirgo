@@ -134,7 +134,7 @@ export default function GoalsTab({ data, updateData, theme, convertToBase }: Goa
               <span className={`text-[11px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
-                Step 3 · Capital Milestones
+                Step 4 · Capital Milestones
               </span>
               <span className="text-slate-400">·</span>
               <span className="text-xs text-slate-500">Working Life Goals</span>
