@@ -286,7 +286,19 @@ export default function App() {
       }
       const isAlreadyMatured = a.maturityYear < currentYear || (a.maturityYear === currentYear && a.maturityMonth <= currentMonth);
       if (isAlreadyMatured) {
-        addLiquidHolding(a.nativeAmount, a.currency);
+        const postMaturityYield = safeFloat(a.yield ?? 0);
+        if (a.isMaturityPortfolio && postMaturityYield !== 0) {
+          staticAssets.push({
+            id: a.id,
+            name: a.name,
+            nativeAmount: a.nativeAmount,
+            currency: a.currency,
+            yieldRate: postMaturityYield,
+            appreciationStartYear: a.maturityYear + 1
+          });
+        } else {
+          addLiquidHolding(a.nativeAmount, a.currency);
+        }
         return false;
       }
       return true;
@@ -502,10 +514,23 @@ export default function App() {
       // 2. Asset Maturity Check (processes for both working years and retirement years!)
       activeFutureAssets = activeFutureAssets.filter(asset => {
         if (targetYear >= asset.maturityYear) {
-          const payout = asset.isMaturityPortfolio
-            ? convertToBaseAtYear(asset.amount, asset.currency, yearIndex)
-            : convertToBaseAtYear(asset.nativeAmount, asset.currency, yearIndex);
-          maturedSum += payout;
+          const payoutNative = asset.isMaturityPortfolio ? safeFloat(asset.amount) : asset.nativeAmount;
+          const payout = convertToBaseAtYear(payoutNative, asset.currency, yearIndex);
+          const postMaturityYield = safeFloat(asset.yield ?? 0);
+
+          if (asset.isMaturityPortfolio && postMaturityYield !== 0) {
+            staticAssets.push({
+              id: asset.id,
+              name: asset.name,
+              nativeAmount: payoutNative,
+              currency: asset.currency,
+              yieldRate: postMaturityYield,
+              appreciationStartYear: asset.maturityYear + 1
+            });
+          } else {
+            maturedSum += payout;
+          }
+
           yearEvents.push({
             type: 'maturity',
             title: `Asset Matures: ${asset.name}`,

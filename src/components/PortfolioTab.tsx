@@ -79,6 +79,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
   const [s2LastPaymentYear, setS2LastPaymentYear] = useState<number>(currentYear + 5);
   const [s2MaturityMonth, setS2MaturityMonth] = useState<number>(12);
   const [s2MaturityYear, setS2MaturityYear] = useState<number>(currentYear + 10);
+  const [s2Yield, setS2Yield] = useState<string>('0');
   const [s2Currency, setS2Currency] = useState(data.baseCurrency || 'USD');
   const [editingS2Id, setEditingS2Id] = useState<string | null>(null);
 
@@ -194,6 +195,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
 
     const currentInv = safeFloat(s2CurrentInvestment);
     const contrib = safeFloat(s2Contribution);
+    const yieldVal = safeFloat(s2Yield);
 
     if (editingS2Id) {
       const updated = (data.assets || []).map(a => 
@@ -211,6 +213,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
               lastPaymentYear: s2LastPaymentYear,
               maturityMonth: s2MaturityMonth,
               maturityYear: s2MaturityYear,
+              yield: yieldVal,
               currency: s2Currency
             }
           : a
@@ -231,6 +234,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
         lastPaymentYear: s2LastPaymentYear,
         maturityMonth: s2MaturityMonth,
         maturityYear: s2MaturityYear,
+        yield: yieldVal,
         currency: s2Currency
       };
       updateData('assets', [...(data.assets || []), newAsset]);
@@ -239,6 +243,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     setS2CurrentInvestment('');
     setS2Amount('');
     setS2Contribution('');
+    setS2Yield('0');
   };
 
   const startEditS2 = (a: Asset) => {
@@ -253,6 +258,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     setS2LastPaymentYear(a.lastPaymentYear || currentYear + 5);
     setS2MaturityMonth(a.maturityMonth || 12);
     setS2MaturityYear(a.maturityYear || currentYear + 10);
+    setS2Yield((a.yield ?? 0).toString());
     setS2Currency(a.currency || data.baseCurrency);
   };
 
@@ -262,6 +268,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     setS2CurrentInvestment('');
     setS2Amount('');
     setS2Contribution('');
+    setS2Yield('0');
   };
 
   // Handlers for Scenario 3
@@ -876,6 +883,49 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                   </div>
                 </div>
 
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 items-end">
+                  <div className="flex flex-col justify-end min-w-0">
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5 leading-tight whitespace-nowrap truncate">
+                      Post-Maturity Appreciation %
+                    </label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={s2Yield}
+                      onChange={(e) => setS2Yield(e.target.value)}
+                      placeholder="0.0"
+                      className={`w-full h-10 px-3 rounded-xl text-xs font-mono tabular-nums border outline-none ${
+                        isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-amber-500' : 'bg-white border-slate-200 text-slate-900 focus:border-amber-500 shadow-sm'
+                      }`}
+                    />
+                  </div>
+
+                  <div className={`h-10 px-3 rounded-xl border text-[11px] flex items-center justify-between gap-2 ${
+                    isDark ? 'bg-slate-900/70 border-slate-800 text-slate-400' : 'bg-white border-slate-200/80 text-slate-600'
+                  }`}>
+                    <span className="flex items-center gap-1.5 truncate">
+                      <Calendar size={12} className="text-amber-500 shrink-0" />
+                      <span className="truncate">
+                        {safeFloat(s2Yield) !== 0
+                          ? `Effective ${s2MaturityYear + 1} (+1 yr)`
+                          : `Starts ${s2MaturityYear + 1} if > 0%`}
+                      </span>
+                    </span>
+                    {safeFloat(s2Amount) > 0 && safeFloat(s2Yield) !== 0 && (() => {
+                      const retireYear = currentYear + Math.max(0, (data.retirementAge || 65) - (data.currentAge || 30));
+                      const horizonYear = currentYear + Math.max(0, (data.lifeExpectancy || 90) - (data.currentAge || 30));
+                      const targetPreviewYear = retireYear >= s2MaturityYear + 1 ? retireYear : horizonYear;
+                      const compYears = Math.max(0, targetPreviewYear - (s2MaturityYear + 1) + 1);
+                      const projectedVal = safeFloat(s2Amount) * Math.pow(Math.max(0, 1 + safeFloat(s2Yield) / 100), compYears);
+                      return (
+                        <span className="font-mono font-bold text-amber-500 shrink-0">
+                          {targetPreviewYear}: {formatCurrency(projectedVal, s2Currency)}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                </div>
+
                 <button
                   type="submit"
                   disabled={!s2Name.trim() || !s2Amount}
@@ -923,10 +973,18 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                           </>
                         ) : null}
                       </div>
-                      <div className="text-[11px] text-slate-500 flex items-center gap-2 pt-0.5">
+                      <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap pt-0.5">
                         <span>Pays until: {MONTHS[(a.lastPaymentMonth || 12) - 1]} {a.lastPaymentYear}</span>
                         <span aria-hidden="true">·</span>
                         <span className="text-amber-500 font-medium">Matures: {MONTHS[(a.maturityMonth || 12) - 1]} {a.maturityYear}</span>
+                        {(a.yield ?? 0) !== 0 && (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span className="text-emerald-500 font-medium">
+                              Appreciates {a.yield}%/yr (from {(a.maturityYear || currentYear) + 1})
+                            </span>
+                          </>
+                        )}
                       </div>
                     </div>
 
