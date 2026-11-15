@@ -238,16 +238,25 @@ export default function App() {
       }
     });
 
-    // Normalize static assets and Real Estate / Insurance (Scenario 1 & 2) in native currency
+    // Normalize Scenario 1 Outright Assets (Asset Inventory) & Scenario 2 Maturity Assets in native currency
+    const staticAssets: Array<{
+      id: string;
+      name: string;
+      nativeAmount: number;
+      currency: string;
+      yieldRate: number;
+      appreciationStartYear: number;
+    }> = [];
+
     const futureAssets = (data.assets || []).map(a => {
       const maturityYear = safeFloat(a.maturityYear) || currentYear;
       const maturityMonth = safeFloat(a.maturityMonth) || 12;
       const isMaturityPortfolio = a.valueMode === 'Real Estate & Insurance' || a.valueMode === 'Final Value at Maturity';
       const isStaticAsset = a.valueMode === 'Asset Inventory' || !a.valueMode;
 
-      const isAlreadyMatured = isStaticAsset || (maturityYear < currentYear || (maturityYear === currentYear && maturityMonth <= currentMonth));
+      const isAlreadyMatured = !isStaticAsset && (maturityYear < currentYear || (maturityYear === currentYear && maturityMonth <= currentMonth));
 
-      const nativeAmount = isAlreadyMatured
+      const nativeAmount = (isStaticAsset || isAlreadyMatured)
         ? safeFloat(a.amount)
         : (isMaturityPortfolio ? safeFloat(a.currentInvestment || 0) : safeFloat(a.amount));
 
@@ -260,11 +269,22 @@ export default function App() {
         nativeAmount,
         nativeContribution,
         isMaturityPortfolio,
+        isStaticAsset,
         contributionFrequency: a.contributionFrequency || 'None'
       };
     }).filter(a => {
-      const isStaticAsset = a.valueMode === 'Asset Inventory' || !a.valueMode;
-      const isAlreadyMatured = isStaticAsset || (a.maturityYear < currentYear || (a.maturityYear === currentYear && a.maturityMonth <= currentMonth));
+      if (a.isStaticAsset) {
+        staticAssets.push({
+          id: a.id,
+          name: a.name,
+          nativeAmount: a.nativeAmount,
+          currency: a.currency,
+          yieldRate: safeFloat(a.yield ?? 0),
+          appreciationStartYear: safeFloat(a.appreciationStartYear) || currentYear
+        });
+        return false;
+      }
+      const isAlreadyMatured = a.maturityYear < currentYear || (a.maturityYear === currentYear && a.maturityMonth <= currentMonth);
       if (isAlreadyMatured) {
         addLiquidHolding(a.nativeAmount, a.currency);
         return false;
@@ -354,6 +374,7 @@ export default function App() {
     let prevTotalNominal = Math.max(
       0,
       getLiquidAssetsBaseAtYear(0, rollingBaseAssets) +
+        staticAssets.reduce((s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, 0), 0) +
         activeInvestments.reduce((s, i) => s + convertToBaseAtYear(i.nativeBalance, i.currency, 0), 0) +
         activeFutureAssets.reduce((s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, 0), 0)
     );
@@ -529,6 +550,22 @@ export default function App() {
         return true;
       });
 
+      // 2b. Scenario 1 Outright Assets appreciation from configured appreciationStartYear
+      staticAssets.forEach((sa) => {
+        if (sa.nativeAmount <= 0) return;
+        if (sa.appreciationStartYear > currentYear && targetYear === sa.appreciationStartYear && sa.yieldRate !== 0) {
+          yearEvents.push({
+            type: 'cashflow',
+            title: `Appreciation Starts: ${sa.name} (${sa.yieldRate}%/yr)`,
+            shortLabel: `Yield: ${truncateLabel(sa.name)}`,
+            color: '#0ea5e9'
+          });
+        }
+        if (targetYear >= sa.appreciationStartYear && sa.yieldRate !== 0) {
+          sa.nativeAmount *= Math.max(0, 1 + sa.yieldRate / 100);
+        }
+      });
+
       const lumpSumRetirement = isFirstYearRetirement ? getRetirementLumpSumAtYear(yearIndex) * inflationMultiplier : 0;
 
       if (!isRetired) {
@@ -586,7 +623,11 @@ export default function App() {
           activeInvestments.forEach(inv => {
             inv.nativeBalance = 0;
           });
-          combinedPoolAtRetirement = getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) / inflationMultiplier;
+          const staticAssetSumAtRetire = staticAssets.reduce(
+            (s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, yearIndex),
+            0
+          );
+          combinedPoolAtRetirement = (getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) + staticAssetSumAtRetire) / inflationMultiplier;
 
           yearEvents.push({
             type: 'retirement',
@@ -618,7 +659,7 @@ export default function App() {
         // Add matured assets and deduct remaining premium/contributions payments in retirement too
         rollingBaseAssets += maturedSum - yearlyContributionTotal;
 
-        // If base cash pool drops negative, draw down foreign-currency liquid holdings at this year's projected FX rate
+        // If base cash pool drops negative, draw down foreign-currency liquid holdings and Scenario 1 assets
         if (rollingBaseAssets < 0) {
           let deficitBase = -rollingBaseAssets;
           for (const curr of Object.keys(liquidForeignHoldings)) {
@@ -635,13 +676,35 @@ export default function App() {
               }
             }
           }
+          if (deficitBase > 0) {
+            for (const sa of staticAssets) {
+              if (sa.nativeAmount > 0 && deficitBase > 0) {
+                const assetBase = convertToBaseAtYear(sa.nativeAmount, sa.currency, yearIndex);
+                if (assetBase >= deficitBase) {
+                  sa.nativeAmount = sa.nativeAmount * (1 - deficitBase / assetBase);
+                  deficitBase = 0;
+                  break;
+                } else {
+                  deficitBase -= assetBase;
+                  sa.nativeAmount = 0;
+                }
+              }
+            }
+          }
           rollingBaseAssets = deficitBase > 0 ? -deficitBase : 0;
         }
 
-        if (getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) <= 0) {
+        const staticAssetSumRetirementCheck = staticAssets.reduce(
+          (s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, yearIndex),
+          0
+        );
+        if (getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) + staticAssetSumRetirementCheck <= 0) {
           rollingBaseAssets = 0;
           Object.keys(liquidForeignHoldings).forEach((curr) => {
             liquidForeignHoldings[curr] = 0;
+          });
+          staticAssets.forEach((sa) => {
+            sa.nativeAmount = 0;
           });
           if (!runwayEnded) {
             runwayEnded = true;
@@ -661,9 +724,13 @@ export default function App() {
         (s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, yearIndex),
         0
       );
+      const staticAssetSum = staticAssets.reduce(
+        (s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, yearIndex),
+        0
+      );
       const totalNominal = Math.max(
         0,
-        getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) + yearEndInvSum + futureAssetSum
+        getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) + staticAssetSum + yearEndInvSum + futureAssetSum
       );
 
       const targetCoreCost =

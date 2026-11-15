@@ -64,6 +64,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
   const [s1Type, setS1Type] = useState('Real Estate');
   const [s1Amount, setS1Amount] = useState<string>('');
   const [s1Yield, setS1Yield] = useState<string>('2.5');
+  const [s1AppreciationStartYear, setS1AppreciationStartYear] = useState<number>(currentYear);
   const [s1Currency, setS1Currency] = useState(data.baseCurrency || 'USD');
   const [editingS1Id, setEditingS1Id] = useState<string | null>(null);
 
@@ -129,6 +130,8 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     const amountVal = safeFloat(s1Amount);
     if (!s1Name.trim() || amountVal <= 0) return;
 
+    const startYearVal = Math.max(currentYear, safeFloat(s1AppreciationStartYear) || currentYear);
+
     if (editingS1Id) {
       const updated = (data.assets || []).map(a => 
         a.id === editingS1Id 
@@ -138,6 +141,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
               type: s1Type, 
               amount: amountVal, 
               yield: safeFloat(s1Yield), 
+              appreciationStartYear: startYearVal,
               currency: s1Currency,
               valueMode: 'Asset Inventory' as const
             }
@@ -153,6 +157,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
         type: s1Type,
         amount: amountVal,
         yield: safeFloat(s1Yield),
+        appreciationStartYear: startYearVal,
         currency: s1Currency
       };
       updateData('assets', [...(data.assets || []), newAsset]);
@@ -160,6 +165,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     setS1Name('');
     setS1Amount('');
     setS1Yield('2.5');
+    setS1AppreciationStartYear(currentYear);
   };
 
   const startEditS1 = (a: Asset) => {
@@ -168,6 +174,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     setS1Type(a.type || 'Real Estate');
     setS1Amount(a.amount.toString());
     setS1Yield((a.yield ?? 2.5).toString());
+    setS1AppreciationStartYear(a.appreciationStartYear || currentYear);
     setS1Currency(a.currency || data.baseCurrency);
   };
 
@@ -175,6 +182,8 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
     setEditingS1Id(null);
     setS1Name('');
     setS1Amount('');
+    setS1Yield('2.5');
+    setS1AppreciationStartYear(currentYear);
   };
 
   // Handlers for Scenario 2
@@ -514,25 +523,25 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                   </div>
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end">
+                  <div className="flex flex-col justify-end min-w-0">
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5 leading-tight whitespace-nowrap truncate">
                       Asset Category
                     </label>
                     <select
                       value={s1Type}
                       onChange={(e) => setS1Type(e.target.value)}
-                      className={`w-full px-3.5 py-2.5 rounded-xl text-xs border ${
-                        isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                      className={`w-full h-10 px-3 rounded-xl text-xs border outline-none ${
+                        isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-sky-500' : 'bg-white border-slate-200 text-slate-900 focus:border-sky-500 shadow-sm'
                       }`}
                     >
                       {ASSET_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
 
-                  <div>
-                    <label className="block text-[10px] font-black uppercase tracking-widest text-slate-500 mb-1.5">
-                      Ann. Appreciation %
+                  <div className="flex flex-col justify-end min-w-0">
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5 leading-tight whitespace-nowrap truncate">
+                      Appreciation %
                     </label>
                     <input
                       type="number"
@@ -540,12 +549,54 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                       value={s1Yield}
                       onChange={(e) => setS1Yield(e.target.value)}
                       placeholder="2.5"
-                      className={`w-full px-3.5 py-2.5 rounded-xl text-xs font-mono tabular-nums border outline-none ${
+                      className={`w-full h-10 px-3 rounded-xl text-xs font-mono tabular-nums border outline-none ${
                         isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-sky-500' : 'bg-white border-slate-200 text-slate-900 focus:border-sky-500 shadow-sm'
                       }`}
                     />
                   </div>
+
+                  <div className="flex flex-col justify-end min-w-0">
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-slate-500 mb-1.5 leading-tight whitespace-nowrap truncate">
+                      Start Year
+                    </label>
+                    <select
+                      value={s1AppreciationStartYear}
+                      onChange={(e) => setS1AppreciationStartYear(parseInt(e.target.value))}
+                      className={`w-full h-10 px-3 rounded-xl text-xs font-mono tabular-nums border outline-none ${
+                        isDark ? 'bg-slate-900 border-slate-700 text-white focus:border-sky-500' : 'bg-white border-slate-200 text-slate-900 focus:border-sky-500 shadow-sm'
+                      }`}
+                    >
+                      {yearOptionsOnly.map(y => (
+                        <option key={y} value={y}>
+                          {y === currentYear ? `${y} (Now)` : y}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
+
+                {safeFloat(s1Amount) > 0 && (
+                  <div className={`px-3 py-2 rounded-xl border text-[11px] flex items-center justify-between gap-2 ${
+                    isDark ? 'bg-slate-900/70 border-slate-800 text-slate-400' : 'bg-white border-slate-200/80 text-slate-600'
+                  }`}>
+                    <span className="flex items-center gap-1.5">
+                      <Calendar size={12} className="text-sky-500 shrink-0" />
+                      {s1AppreciationStartYear > currentYear
+                        ? `Flat until ${s1AppreciationStartYear}, then ${safeFloat(s1Yield)}%/yr`
+                        : `Appreciates ${safeFloat(s1Yield)}%/yr from ${currentYear}`}
+                    </span>
+                    {(() => {
+                      const retireYear = currentYear + Math.max(0, (data.retirementAge || 65) - (data.currentAge || 30));
+                      const compoundingYears = Math.max(0, retireYear - Math.max(currentYear, s1AppreciationStartYear) + 1);
+                      const projectedAtRetire = safeFloat(s1Amount) * Math.pow(Math.max(0, 1 + safeFloat(s1Yield) / 100), compoundingYears);
+                      return (
+                        <span className="font-mono font-bold text-sky-500 shrink-0">
+                          {retireYear}: {formatCurrency(projectedAtRetire, s1Currency)}
+                        </span>
+                      );
+                    })()}
+                  </div>
+                )}
 
                 <button
                   type="submit"
@@ -585,7 +636,9 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                           {formatCurrency(a.amount, a.currency)}
                         </span>
                         <span aria-hidden="true">·</span>
-                        <span className="text-[11px]">Appreciates: {a.yield ?? 2.5}% / yr</span>
+                        <span className="text-[11px]">
+                          Appreciates: {a.yield ?? 2.5}% / yr {(a.appreciationStartYear && a.appreciationStartYear > currentYear) ? `(starts ${a.appreciationStartYear})` : `(from ${a.appreciationStartYear || currentYear})`}
+                        </span>
                         {a.currency !== data.baseCurrency && (
                           <>
                             <span aria-hidden="true">·</span>

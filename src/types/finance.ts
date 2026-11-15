@@ -72,6 +72,7 @@ export interface Asset {
   amount: number; // Market value (Scenario 1) or Final maturity payout (Scenario 2)
   currency: string;
   yield?: number; // Annual appreciation % (Scenario 1)
+  appreciationStartYear?: number; // Year when Scenario 1 annual appreciation begins
   currentInvestment?: number; // Invested till date (Scenario 2)
   contribution?: number; // Ongoing installment (Scenario 2)
   contributionFrequency?: 'None' | 'Monthly' | 'Quarterly' | 'Semi-Yearly' | 'Yearly';
