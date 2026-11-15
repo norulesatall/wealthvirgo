@@ -131,20 +131,20 @@ export default function GoalsTab({ data, updateData, theme, convertToBase }: Goa
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
             <div className="flex items-center gap-2">
-              <span className={`text-[11px] font-black uppercase tracking-widest ${
+              <span className={`text-[10px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
-                Step 4 · Capital Milestones
+                Step 5 · Capital Milestones
               </span>
               <span className="text-slate-400">·</span>
-              <span className="text-xs text-slate-500">Working Life Goals</span>
+              <span className="text-[11px] text-slate-500">Working Life Goals</span>
             </div>
-            <h2 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
+            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${
               isDark ? 'text-white' : 'text-slate-900'
             }`}>
               What major milestones are you planning before you retire?
             </h2>
-            <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
               Large life events (home purchases, college tuition, dream weddings, starting a business) require dedicated capital. Enter values in today&apos;s purchasing power — we automatically adjust them for your <strong>{data.inflationRate || 2.5}%</strong> inflation rate when they occur.
             </p>
           </div>
@@ -156,7 +156,7 @@ export default function GoalsTab({ data, updateData, theme, convertToBase }: Goa
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
               Total Capital Committed
             </span>
-            <div className="text-2xl font-black font-mono tabular-nums tracking-tight text-indigo-500">
+            <div className="text-lg md:text-xl font-black font-mono tabular-nums tracking-tight text-indigo-500">
               {formatCurrency(totalGoalsPV, data.baseCurrency)}
             </div>
             <div className="text-[11px] text-slate-500 mt-2 flex items-center justify-between">
@@ -178,7 +178,7 @@ export default function GoalsTab({ data, updateData, theme, convertToBase }: Goa
               <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
                 <Target size={16} />
               </div>
-              <h3 className={`text-base font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h3 className={`text-sm md:text-base font-bold ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 {editingGoalId ? 'Edit Milestone' : 'Add New Milestone'}
               </h3>
             </div>
@@ -361,7 +361,7 @@ export default function GoalsTab({ data, updateData, theme, convertToBase }: Goa
                 >
                   <div className="space-y-1.5 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
-                      <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                      <span className={`font-bold text-[13px] ${isDark ? 'text-white' : 'text-slate-900'}`}>
                         {g.name}
                       </span>
                       <span className="text-xs text-slate-400">·</span>

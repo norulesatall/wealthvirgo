@@ -4,6 +4,8 @@ export interface Income {
   amount: number;
   frequency: 'Monthly' | 'Quarterly' | 'Yearly';
   currency: string;
+  startYear?: number;
+  endYear?: number;
 }
 
 export interface Expense {
@@ -12,9 +14,55 @@ export interface Expense {
   amount: number;
   frequency: 'Monthly' | 'Quarterly' | 'Yearly';
   currency: string;
+  startMonth?: number;
+  startYear?: number;
   lastPaymentMonth?: number;
   lastPaymentYear?: number;
 }
+
+export interface TaxBracket {
+  id: string;
+  minIncome: number;
+  maxIncome?: number | null;
+  rate: number;
+}
+
+export interface TaxDeduction {
+  id: string;
+  name: string;
+  category: 'Deduction' | 'Credit';
+  amount: number;
+  frequency: 'Monthly' | 'Yearly';
+  currency: string;
+}
+
+export interface TaxConfig {
+  enabled: boolean;
+  mode: 'Progressive Brackets' | 'Flat Effective Rate';
+  flatTaxRate: number;
+  standardDeduction: number;
+  surchargeRate: number;
+  payrollSocialTaxRate: number;
+  payrollCap: number;
+  indexBracketsToInflation: boolean;
+  taxRetirementIncome: boolean;
+  brackets: TaxBracket[];
+  deductions: TaxDeduction[];
+}
+
+export const DEFAULT_TAX_CONFIG: TaxConfig = {
+  enabled: true,
+  mode: 'Progressive Brackets',
+  flatTaxRate: 0,
+  standardDeduction: 0,
+  surchargeRate: 0,
+  payrollSocialTaxRate: 0,
+  payrollCap: 0,
+  indexBracketsToInflation: true,
+  taxRetirementIncome: true,
+  brackets: [],
+  deductions: [],
+};
 
 export interface Asset {
   id: string;
@@ -79,6 +127,7 @@ export interface FinancialState {
   goals: Goal[];
   assets: Asset[];
   investments: Investment[];
+  taxConfig: TaxConfig;
 }
 
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR', 'AED', 'SGD', 'NZD'];

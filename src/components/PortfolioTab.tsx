@@ -344,20 +344,20 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
             <div className="flex items-center gap-2">
-              <span className={`text-[11px] font-black uppercase tracking-widest ${
+              <span className={`text-[10px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
                 Step 3 · Wealth Architecture
               </span>
               <span className="text-slate-400">·</span>
-              <span className="text-xs text-slate-500">3 Comprehensive Scenarios</span>
+              <span className="text-[11px] text-slate-500">3 Comprehensive Scenarios</span>
             </div>
-            <h2 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
+            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${
               isDark ? 'text-white' : 'text-slate-900'
             }`}>
               Where is your wealth stored and compounding?
             </h2>
-            <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
               We divide your assets into 3 distinct, intuitive scenarios: <strong>Assets you own outright today</strong>, <strong>Policies or properties that mature with a lump sum payout</strong>, and <strong>Active compounding growth portfolios</strong>.
             </p>
           </div>
@@ -369,7 +369,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
             <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 block mb-1">
               Current Starting Net Worth
             </span>
-            <div className="text-2xl font-black font-mono tabular-nums tracking-tight text-indigo-500">
+            <div className="text-lg md:text-xl font-black font-mono tabular-nums tracking-tight text-indigo-500">
               {formatCurrency(startingNetWorth, data.baseCurrency)}
             </div>
             <div className="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-slate-800/10 dark:border-slate-800/50 text-[10px]">
@@ -428,7 +428,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                 <div className={`p-2 rounded-xl ${isDark ? 'bg-sky-500/10 text-sky-400' : 'bg-sky-50 text-sky-600'}`}>
                   <Building2 size={18} />
                 </div>
-                <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   Scenario 1: What valuable assets do you own outright today?
                 </h3>
               </div>
@@ -438,7 +438,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
             </div>
             <div className="text-right">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Outright Valuation</span>
-              <span className="text-base font-bold font-mono tabular-nums text-sky-500">
+              <span className="text-sm font-bold font-mono tabular-nums text-sky-500">
                 {formatCurrency(totalS1Value, data.baseCurrency)}
               </span>
             </div>
@@ -577,7 +577,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{a.name}</span>
+                        <span className={`font-bold text-[13px] ${isDark ? 'text-white' : 'text-slate-900'}`}>{a.name}</span>
                         <span className="text-[10px] text-slate-500 font-medium">({a.type || 'Asset'})</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
@@ -630,7 +630,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                 <div className={`p-2 rounded-xl ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-600'}`}>
                   <Briefcase size={18} />
                 </div>
-                <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   Scenario 2: Do you have policies or properties with ongoing installments that mature into cash?
                 </h3>
               </div>
@@ -640,7 +640,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
             </div>
             <div className="text-right">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Expected Future Payouts</span>
-              <span className="text-base font-bold font-mono tabular-nums text-amber-500">
+              <span className="text-sm font-bold font-mono tabular-nums text-amber-500">
                 {formatCurrency(totalS2MaturityValue, data.baseCurrency)}
               </span>
             </div>
@@ -853,7 +853,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{a.name}</span>
+                        <span className={`font-bold text-[13px] ${isDark ? 'text-white' : 'text-slate-900'}`}>{a.name}</span>
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                         <span className="font-mono font-bold tabular-nums text-amber-500">
@@ -912,7 +912,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                 <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
                   <TrendingUp size={18} />
                 </div>
-                <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                   Scenario 3: Where are you actively compounding your long-term wealth?
                 </h3>
               </div>
@@ -922,7 +922,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
             </div>
             <div className="text-right">
               <span className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">Active Growth Balance</span>
-              <span className="text-base font-bold font-mono tabular-nums text-indigo-500">
+              <span className="text-sm font-bold font-mono tabular-nums text-indigo-500">
                 {formatCurrency(totalS3Balance, data.baseCurrency)}
               </span>
             </div>
@@ -1126,7 +1126,7 @@ export default function PortfolioTab({ data, updateData, theme, convertToBase }:
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
-                        <span className={`font-bold text-sm ${isDark ? 'text-white' : 'text-slate-900'}`}>{inv.name}</span>
+                        <span className={`font-bold text-[13px] ${isDark ? 'text-white' : 'text-slate-900'}`}>{inv.name}</span>
                         <span className="text-[11px] font-mono font-bold text-indigo-400">
                           {inv.expectedReturn || 8}% CAGR
                         </span>

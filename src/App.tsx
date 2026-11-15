@@ -32,14 +32,18 @@ import {
   Loader2,
   ArrowRight,
   MessageSquareText,
-  Sparkles
+  Sparkles,
+  Receipt
 } from 'lucide-react';
 import { Chart, registerables } from 'chart.js';
 import { motion, AnimatePresence } from 'motion/react';
 import CashflowTab from './components/CashflowTab';
 import PortfolioTab from './components/PortfolioTab';
+import TaxTab from './components/TaxTab';
 import GoalsTab from './components/GoalsTab';
 import RetirementTab from './components/RetirementTab';
+import { DEFAULT_TAX_CONFIG, FinancialState } from './types/finance';
+import { calculateAnnualTax } from './utils/taxCalculator';
 
 const logoImg = '/wealth_virgo_logo.jpg';
 
@@ -54,7 +58,7 @@ const MONTHS = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-const DEFAULT_STATE = {
+const DEFAULT_STATE: FinancialState = {
   baseCurrency: 'USD',
   currentAge: 30,
   retirementAge: 65,
@@ -68,7 +72,8 @@ const DEFAULT_STATE = {
   retirementExpenses: [],
   goals: [],
   assets: [],
-  investments: []
+  investments: [],
+  taxConfig: DEFAULT_TAX_CONFIG
 };
 
 // --- HELPER MATH FUNCTIONS ---
@@ -81,14 +86,36 @@ const formatCurrency = (amount: number, currency: string) => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency, maximumFractionDigits: 0 }).format(amount);
 };
 
+const NAV_ITEMS = [
+  { id: 'profile', icon: Settings, label: 'Parameters', step: 1 },
+  { id: 'cashflow', icon: DollarSign, label: 'Cash Flow', step: 2 },
+  { id: 'portfolio', icon: Briefcase, label: 'Portfolio', step: 3 },
+  { id: 'tax', icon: Receipt, label: 'Tax', step: 4 },
+  { id: 'goals', icon: TrendingUp, label: 'Goals', step: 5 },
+  { id: 'retirement', icon: History, label: 'Retirement', step: 6 },
+  { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' },
+] as const;
+
 export default function App() {
   // --- STATE ---
   const [activeTab, setActiveTab] = useState('profile');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const mainRef = useRef<HTMLElement>(null);
   const [passwordModal, setPasswordModal] = useState<{ type: 'encrypt' | 'decrypt', fileData?: string } | null>(null);
   const [tempPassword, setTempPassword] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
+
+  const handleTabChange = useCallback((tabId: string) => {
+    setActiveTab(tabId);
+    setIsMobileMenuOpen(false);
+    mainRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
+
+  const currentNavIndex = NAV_ITEMS.findIndex(item => item.id === activeTab);
+  const nextNavItem = currentNavIndex >= 0 && currentNavIndex < NAV_ITEMS.length - 1
+    ? NAV_ITEMS[currentNavIndex + 1]
+    : null;
   const [data, setData] = useState(DEFAULT_STATE);
   const [exchangeRates, setExchangeRates] = useState<Record<string, number>>({ [DEFAULT_STATE.baseCurrency]: 1 });
   const [isRatesLoading, setIsRatesLoading] = useState(false);
@@ -193,34 +220,47 @@ export default function App() {
     });
 
     let totalExpensesBase = (data.expenses || []).reduce((s, e) => s + convertToBase(e.amount * getFrequencyMultiplier(e.frequency), e.currency), 0);
-    let totalIncomeBase = (data.incomes || []).reduce((s, e) => s + convertToBase(e.amount * getFrequencyMultiplier(e.frequency), e.currency), 0);
 
-    const getYearlyExpenseOutlay = (targetYear: number) => {
+    const getYearlyIncomeInflow = (targetYear: number, isRetired: boolean) => {
+      let activeIncomeSum = 0;
+      (data.incomes || []).forEach((inc: any) => {
+        const startYear = safeFloat(inc.startYear);
+        const endYear = safeFloat(inc.endYear);
+
+        const isBeforeStart = startYear > 0 && targetYear < startYear;
+        const isAfterEnd = endYear > 0 ? targetYear > endYear : isRetired;
+
+        if (!isBeforeStart && !isAfterEnd) {
+          activeIncomeSum += convertToBase(inc.amount * getFrequencyMultiplier(inc.frequency), inc.currency);
+        }
+      });
+      return activeIncomeSum;
+    };
+
+    const getYearlyExpenseOutlay = (targetYear: number, isRetired: boolean) => {
       let activeExpensesSum = 0;
       (data.expenses || []).forEach((e: any) => {
-        let activeMonths = 12;
+        const eStartYear = safeFloat(e.startYear);
+        const eStartMonth = safeFloat(e.startMonth) || 1;
         const eLastYear = safeFloat(e.lastPaymentYear);
-        const eLastMonth = safeFloat(e.lastPaymentMonth);
-        
-        if (eLastYear > 0) {
-          if (targetYear > eLastYear) {
-            activeMonths = 0;
-          } else if (targetYear === eLastYear) {
-            if (e.frequency === 'Monthly' && eLastMonth > 0) {
-              activeMonths = Math.min(12, Math.max(0, eLastMonth));
-            } else {
-              activeMonths = 12;
-            }
-          }
+        const eLastMonth = safeFloat(e.lastPaymentMonth) || 12;
+
+        if (eStartYear > 0 && targetYear < eStartYear) {
+          return;
         }
-        
+        if (eLastYear === 0 && isRetired) {
+          return;
+        }
+        if (eLastYear > 0 && targetYear > eLastYear) {
+          return;
+        }
+
+        const firstMonth = (eStartYear > 0 && targetYear === eStartYear) ? Math.min(12, Math.max(1, eStartMonth)) : 1;
+        const lastMonth = (eLastYear > 0 && targetYear === eLastYear) ? Math.min(12, Math.max(1, eLastMonth)) : 12;
+        const activeMonths = Math.max(0, lastMonth - firstMonth + 1);
+
         if (activeMonths > 0) {
-          let yearMult = 1;
-          if (e.frequency === 'Monthly') {
-            yearMult = activeMonths;
-          } else {
-            yearMult = getFrequencyMultiplier(e.frequency);
-          }
+          const yearMult = getFrequencyMultiplier(e.frequency) * (activeMonths / 12);
           activeExpensesSum += convertToBase(e.amount * yearMult, e.currency);
         }
       });
@@ -262,10 +302,16 @@ export default function App() {
       const startNominal = Math.max(0, rollingBaseAssets + startInvSum + startFutureAssetSum);
       
       let currentYearExpense = isRetired 
-        ? totalRetirementMonthlyBase * inflationMultiplier 
-        : getYearlyExpenseOutlay(targetYear) * inflationMultiplier;
+        ? (totalRetirementMonthlyBase + getYearlyExpenseOutlay(targetYear, true)) * inflationMultiplier 
+        : getYearlyExpenseOutlay(targetYear, false) * inflationMultiplier;
       
-      let currentYearIncome = isRetired ? 0 : totalIncomeBase * incomeMultiplier;
+      let currentYearGrossIncome = getYearlyIncomeInflow(targetYear, isRetired) * incomeMultiplier;
+      const shouldTaxThisYear = !isRetired || (data.taxConfig?.taxRetirementIncome !== false);
+      const taxBreakdown = shouldTaxThisYear
+        ? calculateAnnualTax(currentYearGrossIncome, data.taxConfig, convertToBase, inflationMultiplier)
+        : null;
+      let currentYearTax = taxBreakdown ? taxBreakdown.totalTax : 0;
+      let currentYearIncome = taxBreakdown ? taxBreakdown.netIncome : currentYearGrossIncome;
       let currentYearGoalExpense = 0;
 
       // 1. Calculate Goals (PV to Nominal)
@@ -371,7 +417,7 @@ export default function App() {
         }
 
         const postRetirementYield = safeFloat(data.postRetirementReturn) / 100;
-        rollingBaseAssets = (rollingBaseAssets * (1 + postRetirementYield)) - currentYearExpense;
+        rollingBaseAssets = (rollingBaseAssets * (1 + postRetirementYield)) + currentYearIncome - currentYearExpense;
         
         // Add matured assets and deduct remaining premium/contributions payments in retirement too
         rollingBaseAssets += maturedSum - yearlyContributionTotal;
@@ -390,7 +436,7 @@ export default function App() {
       const totalNominal = Math.max(0, rollingBaseAssets + yearEndInvSum + futureAssetSum);
 
       const lumpSumRetirement = (age === data.retirementAge) ? (totalRetirementLumpSumBase * inflationMultiplier) : 0;
-      const netExternalFlow = isRetired ? (-currentYearExpense - lumpSumRetirement) : (currentYearIncome - currentYearExpense - currentYearGoalExpense);
+      const netExternalFlow = isRetired ? (currentYearIncome - currentYearExpense - lumpSumRetirement) : (currentYearIncome - currentYearExpense - currentYearGoalExpense);
       const actualChange = totalNominal - startNominal;
       const passiveGrowth = Math.max(0, actualChange - netExternalFlow);
 
@@ -400,6 +446,8 @@ export default function App() {
         nominal: totalNominal,
         real: totalNominal / inflationMultiplier,
         expense: currentYearExpense,
+        grossIncome: currentYearGrossIncome,
+        tax: currentYearTax,
         income: currentYearIncome,
         goalExpense: currentYearGoalExpense,
         yearlyContributionTotal,
@@ -493,13 +541,21 @@ export default function App() {
     try {
       const bytes = CryptoJS.AES.decrypt(fileData, password);
       const decryptedData = JSON.parse(bytes.toString(CryptoJS.enc.Utf8));
-      setData({ ...DEFAULT_STATE, ...decryptedData });
+      setData({
+        ...DEFAULT_STATE,
+        ...decryptedData,
+        taxConfig: { ...DEFAULT_TAX_CONFIG, ...(decryptedData.taxConfig || {}) }
+      });
       setPasswordModal(null);
     } catch (err) {
       // Check if it's a legacy unencrypted file
       try {
         const importedData = JSON.parse(fileData);
-        setData({ ...DEFAULT_STATE, ...importedData });
+        setData({
+          ...DEFAULT_STATE,
+          ...importedData,
+          taxConfig: { ...DEFAULT_TAX_CONFIG, ...(importedData.taxConfig || {}) }
+        });
         setPasswordModal(null);
       } catch (legacyErr) {
         setPasswordError("Decryption failed. Please check your password.");
@@ -514,18 +570,18 @@ export default function App() {
     <div className={`fixed inset-0 ${theme === 'dark' ? 'bg-slate-900 text-slate-200' : 'bg-slate-50 text-slate-900'} font-sans flex flex-col md:flex-row overflow-hidden transition-colors duration-300`}>
       {/* Sidebar */}
       <aside className={`fixed inset-y-0 left-0 transform ${isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'} md:relative md:translate-x-0 w-64 ${theme === 'dark' ? 'bg-slate-950 border-slate-800' : 'bg-white border-slate-200'} border-r p-6 flex flex-col z-50 transition-all duration-200 ease-in-out`}>
-        <div className="flex items-center justify-between mb-10">
+        <div className="flex items-center justify-between mb-8">
           <div className="flex items-center space-x-2.5">
             <img 
               src={logoImg} 
               alt="Wealth Virgo" 
-              className="w-10 h-10 rounded-xl object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
+              className="w-8 h-8 rounded-lg object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).src = '/wealth_virgo_logo.jpg';
               }}
               referrerPolicy="no-referrer"
             />
-            <span className={`font-bold text-2xl tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Wealth Virgo</span>
+            <span className={`font-bold text-base tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Wealth Virgo</span>
           </div>
           <button onClick={() => setIsMobileMenuOpen(false)} className="md:hidden p-2 text-slate-500 hover:text-white">
             <X size={20} />
@@ -533,26 +589,34 @@ export default function App() {
         </div>
         
         <nav className="space-y-1 flex-1 overflow-y-auto overscroll-contain">
-          {[
-            { id: 'profile', icon: Settings, label: 'Parameters' },
-            { id: 'cashflow', icon: DollarSign, label: 'Cash Flow' },
-            { id: 'portfolio', icon: Briefcase, label: 'Portfolio' },
-            { id: 'goals', icon: TrendingUp, label: 'Goals' },
-            { id: 'retirement', icon: History, label: 'Retirement' },
-            { id: 'dashboard', icon: LayoutDashboard, label: 'Dashboard' }
-          ].map(item => (
+          {NAV_ITEMS.map(item => (
             <button
               id={`nav-${item.id}`}
               key={item.id}
-              onClick={() => { setActiveTab(item.id); setIsMobileMenuOpen(false); }}
-              className={`w-full flex items-center space-x-3 px-4 py-2.5 rounded-xl transition-all duration-200 ${
+              onClick={() => handleTabChange(item.id)}
+              className={`w-full flex items-center justify-between px-4 py-2.5 rounded-xl transition-all duration-200 ${
                 activeTab === item.id 
                 ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-500/20' 
                 : theme === 'dark' ? 'text-slate-400 hover:bg-slate-800/50 hover:text-white' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-900'
               }`}
             >
-              <item.icon size={16} />
-              <span className="font-medium text-xs">{item.label}</span>
+              <div className="flex items-center space-x-3">
+                <item.icon size={16} />
+                <span className="font-medium text-xs">{item.label}</span>
+              </div>
+              {'step' in item && item.step !== undefined && (
+                <span
+                  className={`text-[10px] font-mono font-bold tabular-nums w-5 h-5 rounded-md flex items-center justify-center transition-colors ${
+                    activeTab === item.id
+                      ? 'bg-white/20 text-white'
+                      : theme === 'dark'
+                        ? 'bg-slate-800/80 text-slate-400'
+                        : 'bg-slate-100 text-slate-500'
+                  }`}
+                >
+                  {item.step}
+                </span>
+              )}
             </button>
           ))}
         </nav>
@@ -611,12 +675,12 @@ export default function App() {
                }}
                referrerPolicy="no-referrer"
              />
-             <span className={`font-bold text-lg ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Wealth Virgo</span>
+             <span className={`font-bold text-sm ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>Wealth Virgo</span>
            </div>
            <div className="w-10"></div>
         </header>
 
-        <main className={`flex-1 overflow-y-auto overscroll-contain p-4 md:p-8 lg:p-10 pb-32 md:pb-8 ${theme === 'light' ? 'bg-slate-50/50' : ''}`}>
+        <main ref={mainRef} className={`flex-1 overflow-y-auto overscroll-contain p-4 md:p-8 lg:p-10 pb-32 md:pb-8 ${theme === 'light' ? 'bg-slate-50/50' : ''}`}>
           <div className="flex flex-col min-h-full justify-between">
             <div className="flex-1">
               <AnimatePresence mode="wait">
@@ -631,11 +695,26 @@ export default function App() {
               {activeTab === 'dashboard' && <DashboardTab data={data} projection={projection} theme={theme} />}
               {activeTab === 'cashflow' && <CashflowTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
               {activeTab === 'portfolio' && <PortfolioTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
+              {activeTab === 'tax' && <TaxTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
               {activeTab === 'goals' && <GoalsTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
               {activeTab === 'retirement' && <RetirementTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} projection={projection} />}
               {activeTab === 'profile' && <ProfileTab data={data} updateData={updateData} theme={theme} />}
             </motion.div>
           </AnimatePresence>
+
+              {nextNavItem && (
+                <div className={`max-w-7xl mx-auto mt-10 pt-6 border-t flex justify-end ${theme === 'dark' ? 'border-slate-800/80' : 'border-slate-200'}`}>
+                  <button
+                    id="next-step-btn"
+                    type="button"
+                    onClick={() => handleTabChange(nextNavItem.id)}
+                    className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold shadow-lg shadow-indigo-500/20 transition-all cursor-pointer group"
+                  >
+                    <span>Next Step: {nextNavItem.label}</span>
+                    <ArrowRight size={15} className="transition-transform group-hover:translate-x-0.5" />
+                  </button>
+                </div>
+              )}
             </div>
             <Footer theme={theme} />
           </div>
@@ -678,10 +757,10 @@ export default function App() {
                   </button>
                 </div>
 
-                <h3 className={`text-2xl font-bold mb-2 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                <h3 className={`text-lg font-bold mb-2 ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                   {passwordModal.type === 'encrypt' ? 'Secure Export' : 'Secure Import'}
                 </h3>
-                <p className="text-slate-500 text-sm mb-6 leading-relaxed font-medium">
+                <p className="text-slate-500 text-xs mb-6 leading-relaxed font-medium">
                   {passwordModal.type === 'encrypt' 
                     ? 'Enter a password to encrypt your financial data. You will need this password to import the file later.'
                     : 'This file is encrypted. Please enter the password used during export to decrypt and import your data.'}
@@ -787,7 +866,7 @@ const Tooltip = ({ text, theme, children }: { text: string; theme: 'light' | 'da
                   left: coords.left,
                   transform: 'translate(-50%, -100%)'
                 }}
-                className={`w-72 p-4 rounded-2xl border shadow-2xl text-[13px] sm:text-[14px] leading-relaxed font-semibold transition-colors ${
+                className={`w-72 p-3.5 rounded-2xl border shadow-2xl text-xs leading-relaxed font-medium transition-colors ${
                   theme === 'dark' 
                   ? 'bg-slate-900 border-slate-700 text-slate-100 shadow-slate-950/50' 
                   : 'bg-white border-slate-200 text-slate-850 shadow-slate-200'
@@ -881,7 +960,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
 
     csv += `3. CHRONOLOGICAL YEAR-BY-YEAR COMPRESSION LEDGER\n`;
     csv += `---------------------------------------------------------------------------------\n`;
-    csv += `Year,Age,Stage,Net Worth (Nominal),Net Worth (Real Today's Value),Annual Salary Income,Safe Withdrawal Income (${activeSWR}% SWR),Annual Expenses & Goals,Active Annual Savings,Passive Portfolio Growth,Survival Assessment\n`;
+    csv += `Year,Age,Stage,Net Worth (Nominal),Net Worth (Real Today's Value),Gross Salary Income,Income Tax,Final Net Income,Safe Withdrawal Income (${activeSWR}% SWR),Annual Expenses & Goals,Active Annual Savings,Passive Portfolio Growth,Survival Assessment\n`;
 
     projection.yearlyData.forEach((row: any) => {
       const stage = row.isRetired ? 'Retired' : 'Pre-Retirement';
@@ -893,7 +972,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
         status = row.nominal > 0 ? 'SURVIVING: Asset Positive' : 'DEPLETED: Funds Exhausted';
       }
 
-      csv += `${row.year},${row.age},${stage},${row.nominal.toFixed(0)},${row.real.toFixed(0)},${row.income.toFixed(0)},${swrVal},${activeExpenseTotal.toFixed(0)},${row.yearlyContributionTotal.toFixed(0)},${row.passiveGrowth.toFixed(0)},${status}\n`;
+      csv += `${row.year},${row.age},${stage},${row.nominal.toFixed(0)},${row.real.toFixed(0)},${(row.grossIncome ?? row.income).toFixed(0)},${(row.tax ?? 0).toFixed(0)},${row.income.toFixed(0)},${swrVal},${activeExpenseTotal.toFixed(0)},${row.yearlyContributionTotal.toFixed(0)},${row.passiveGrowth.toFixed(0)},${status}\n`;
     });
 
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
@@ -1173,9 +1252,9 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               padding: 12,
               displayColors: true,
               yAlign: 'bottom',
-              titleFont: { size: 14, weight: 'bold' },
-              bodyFont: { size: 13, weight: 'bold' },
-              footerFont: { size: 12, weight: 'bold' },
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 11, weight: 'bold' },
+              footerFont: { size: 11, weight: 'bold' },
               callbacks: {
                 title: (context) => {
                   const index = context[0].dataIndex;
@@ -1244,9 +1323,9 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               borderColor: tooltipBorder,
               borderWidth: 1,
               padding: 12,
-              titleFont: { size: 14, weight: 'bold' },
-              bodyFont: { size: 13, weight: 'bold' },
-              footerFont: { size: 12, weight: 'bold' },
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 11, weight: 'bold' },
+              footerFont: { size: 11, weight: 'bold' },
               callbacks: {
                 label: (context) => {
                   const label = context.label || '';
@@ -1330,9 +1409,9 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               borderWidth: 1,
               padding: 12,
               yAlign: 'bottom',
-              titleFont: { size: 14, weight: 'bold' },
-              bodyFont: { size: 13, weight: 'bold' },
-              footerFont: { size: 12, weight: 'bold' },
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 11, weight: 'bold' },
+              footerFont: { size: 11, weight: 'bold' },
               callbacks: {
                 title: (context) => {
                   const entry = filteredYearly[context[0].dataIndex];
@@ -1415,9 +1494,9 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               borderWidth: 1,
               padding: 12,
               yAlign: 'bottom',
-              titleFont: { size: 14, weight: 'bold' },
-              bodyFont: { size: 13, weight: 'bold' },
-              footerFont: { size: 12, weight: 'bold' },
+              titleFont: { size: 12, weight: 'bold' },
+              bodyFont: { size: 11, weight: 'bold' },
+              footerFont: { size: 11, weight: 'bold' },
               callbacks: {
                 title: (context) => {
                   const entry = compoundingData[context[0].dataIndex];
@@ -1483,7 +1562,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
             </div>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h4 className={`font-black text-sm uppercase tracking-wider ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+                <h4 className={`font-black text-xs uppercase tracking-wider ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
                   Grand Financial Model Excel Planner
                 </h4>
                 <span className="bg-amber-500/10 text-amber-500 text-[10px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full border border-amber-500/20">
@@ -1519,54 +1598,54 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-6 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
+        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-5 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Net Worth</p>
+            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Net Worth</p>
             <Tooltip text="Your total wealth in your base currency. This includes liquid assets, future assets (at PV), and current investment balances." theme={theme}>
               <HelpCircle size={14} className="text-slate-500 hover:text-indigo-400 transition-colors" />
             </Tooltip>
           </div>
-          <h3 className={`text-2xl font-bold tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{formatCurrency(latest.nominal, data.baseCurrency)}</h3>
-          <div className="mt-2 flex items-center text-xs text-slate-400">
-            <span className={`${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'} px-2 py-1 rounded font-mono uppercase tracking-tighter`}>Liquid + Invested</span>
+          <h3 className={`text-lg md:text-xl font-bold tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{formatCurrency(latest.nominal, data.baseCurrency)}</h3>
+          <div className="mt-2 flex items-center text-[11px] text-slate-400">
+            <span className={`${theme === 'dark' ? 'bg-slate-900' : 'bg-slate-100'} px-2 py-0.5 rounded font-mono uppercase tracking-tighter`}>Liquid + Invested</span>
           </div>
         </div>
-        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-6 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
+        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-5 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Ann. Contributions</p>
+            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Ann. Contributions</p>
             <Tooltip text="The total annual amount you are currently contributing to all growth portfolios/investments." theme={theme}>
               <HelpCircle size={14} className="text-slate-500 hover:text-indigo-500 transition-colors" />
             </Tooltip>
           </div>
-          <h3 className="text-2xl font-bold tracking-tight text-emerald-500">{formatCurrency(projection.annualContributions, data.baseCurrency)}</h3>
-          <div className="mt-2 flex items-center text-xs text-emerald-500/70">
-            <span className="bg-emerald-500/10 px-2 py-1 rounded font-mono uppercase tracking-tighter">Towards Growth</span>
+          <h3 className="text-lg md:text-xl font-bold tracking-tight text-emerald-500">{formatCurrency(projection.annualContributions, data.baseCurrency)}</h3>
+          <div className="mt-2 flex items-center text-[11px] text-emerald-500/70">
+            <span className="bg-emerald-500/10 px-2 py-0.5 rounded font-mono uppercase tracking-tighter">Towards Growth</span>
           </div>
         </div>
-        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-6 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
+        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-5 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Retirement Pool</p>
+            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Retirement Pool</p>
             <Tooltip text="The projected total nominal value of all assets on the day you retire, adjusted for inflation to show 'today's value' (Real Value)." theme={theme}>
               <HelpCircle size={14} className="text-slate-500 hover:text-indigo-505 transition-colors" />
             </Tooltip>
           </div>
-          <h3 className="text-2xl font-bold tracking-tight text-indigo-500">{formatCurrency(retired.real, data.baseCurrency)}</h3>
-          <div className="mt-2 flex items-center text-xs text-indigo-500/70">
-            <span className="bg-indigo-500/10 px-2 py-1 rounded font-mono uppercase tracking-tighter">Target at Age {data.retirementAge}</span>
+          <h3 className="text-lg md:text-xl font-bold tracking-tight text-indigo-500">{formatCurrency(retired.real, data.baseCurrency)}</h3>
+          <div className="mt-2 flex items-center text-[11px] text-indigo-500/70">
+            <span className="bg-indigo-500/10 px-2 py-0.5 rounded font-mono uppercase tracking-tighter">Target at Age {data.retirementAge}</span>
           </div>
         </div>
-        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-6 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
+        <div className={`${theme === 'dark' ? 'bg-slate-800/50 border-slate-700/50' : 'bg-white border-slate-200'} p-5 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300 relative group`}>
           <div className="flex justify-between items-start mb-2">
-            <p className="text-slate-500 text-xs font-bold uppercase tracking-wider">Retirement Runway</p>
+            <p className="text-slate-500 text-[11px] font-bold uppercase tracking-wider">Retirement Runway</p>
             <Tooltip text="How many years your wealth will last after retirement while supporting your monthly lifestyle expenses and lump sums." theme={theme}>
               <HelpCircle size={14} className="text-slate-500 hover:text-indigo-500 transition-colors" />
             </Tooltip>
           </div>
-          <h3 className={`text-2xl font-bold tracking-tight ${projection.runwayEnded ? 'text-rose-500' : 'text-emerald-500'}`}>
+          <h3 className={`text-lg md:text-xl font-bold tracking-tight ${projection.runwayEnded ? 'text-rose-500' : 'text-emerald-500'}`}>
             {projection.runwayYears} Years
           </h3>
-          <div className="mt-2 flex items-center text-xs text-slate-400">
-            <span className={`${projection.runwayEnded ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'} px-2 py-1 rounded font-mono uppercase tracking-tighter`}>
+          <div className="mt-2 flex items-center text-[11px] text-slate-400">
+            <span className={`${projection.runwayEnded ? 'bg-rose-500/10 text-rose-500' : 'bg-emerald-500/10 text-emerald-500'} px-2 py-0.5 rounded font-mono uppercase tracking-tighter`}>
               {projection.runwayEnded ? 'Depleted at age ' + (data.retirementAge + projection.runwayYears) : 'Sustainable lifestyle'}
             </span>
           </div>
@@ -1601,7 +1680,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
              <canvas ref={donutChartRef}></canvas>
              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-center pointer-events-none">
                 <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest leading-none mb-1">Total Assets</p>
-                <p className={`text-xl font-bold tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{formatCurrency(latest.nominal, data.baseCurrency)}</p>
+                <p className={`text-base md:text-lg font-bold tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>{formatCurrency(latest.nominal, data.baseCurrency)}</p>
              </div>
           </div>
         </div>
@@ -1675,7 +1754,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
                   <span className="bg-indigo-500/10 text-indigo-400 text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full border border-indigo-500/20">
                     Pro Report Edition
                   </span>
-                  <h3 className="text-xl md:text-2xl font-black tracking-tight mt-3">
+                  <h3 className="text-base md:text-lg font-black tracking-tight mt-3">
                     Unlock Premium Excel Projections Sheet
                   </h3>
                   <p className="text-xs text-slate-400 mt-2 leading-relaxed">
@@ -1977,23 +2056,23 @@ const ParameterInput = memo(({ label, help, value, min, max, step, suffix, onCha
     <div className="mb-8 group">
       <div className="flex justify-between items-center mb-4">
         <div className="flex items-center gap-2">
-          <label className={`text-[10px] font-black uppercase tracking-widest ${theme === 'dark' ? 'text-slate-500 group-hover:text-slate-400' : 'text-slate-400 group-hover:text-slate-600'} transition-colors`}>
+          <label className={`text-[10px] font-black uppercase tracking-widest ${theme === 'dark' ? 'text-slate-500 group-hover:text-slate-400' : 'text-slate-500 group-hover:text-slate-700'} transition-colors`}>
             {label}
           </label>
           {help && (
             <Tooltip text={help} theme={theme}>
-              <HelpCircle size={12} className="text-slate-600 hover:text-indigo-400 transition-colors" />
+              <HelpCircle size={12} className="text-slate-500 hover:text-indigo-400 transition-colors" />
             </Tooltip>
           )}
         </div>
-        <div className={`flex items-center gap-1 ${theme === 'dark' ? 'bg-slate-950/50 border-slate-700/50' : 'bg-slate-100 border-slate-200'} px-3 py-1.5 rounded-xl border focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all`}>
+        <div className={`flex items-center gap-1 ${theme === 'dark' ? 'bg-slate-950/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'} px-3 py-1.5 rounded-xl border focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all`}>
           <input 
             type="number"
             value={inputValue}
             step={step}
             onChange={handleTextChange}
             onBlur={handleBlur}
-            className={`w-14 bg-transparent text-right font-black ${theme === 'dark' ? 'text-indigo-400' : 'text-indigo-600'} text-sm outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
+            className={`w-14 bg-transparent text-right font-mono font-bold tabular-nums ${theme === 'dark' ? 'text-indigo-400' : 'text-indigo-600'} text-xs outline-none [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none`}
           />
           <span className="text-[10px] font-bold text-slate-500 uppercase ml-1 select-none">{suffix.trim()}</span>
         </div>
@@ -2197,13 +2276,13 @@ function Footer({ theme }: { theme: 'light' | 'dark' }) {
             <img 
               src={logoImg} 
               alt="Wealth Virgo" 
-              className="w-10 h-10 rounded-xl object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
+              className="w-8 h-8 rounded-lg object-cover shadow-sm bg-slate-900 border border-slate-700/50" 
               onError={(e) => {
                 (e.currentTarget as HTMLImageElement).src = '/wealth_virgo_logo.jpg';
               }}
               referrerPolicy="no-referrer"
             />
-            <span className={`font-black text-base tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
+            <span className={`font-bold text-sm tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
               Wealth Virgo
             </span>
           </div>
@@ -2277,38 +2356,48 @@ function ProfileTab({ data, updateData, theme }: { data: any, updateData: any, t
       }`}>
         <div className="space-y-2 max-w-2xl">
           <div className="flex items-center gap-2">
-            <span className={`text-[11px] font-black uppercase tracking-widest ${
+            <span className={`text-[10px] font-black uppercase tracking-widest ${
               isDark ? 'text-indigo-400' : 'text-indigo-600'
             }`}>
               Step 1 · Baseline Parameters
             </span>
             <span className="text-slate-400">·</span>
-            <span className="text-xs text-slate-500">Ages {data.currentAge} to {data.lifeExpectancy}</span>
+            <span className="text-[11px] text-slate-500">Ages {data.currentAge} to {data.lifeExpectancy}</span>
           </div>
-          <h2 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
+          <h2 className={`text-lg md:text-xl font-bold tracking-tight ${
             isDark ? 'text-white' : 'text-slate-900'
           }`}>
             What is your timeline and economic outlook?
           </h2>
-          <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+          <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
             Configure your age milestones, expected inflation, income growth, post-retirement yield, and Safe Withdrawal Rate (SWR) to power every projection across your plan.
           </p>
         </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className={`${isDark ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300`}>
-          <h3 className={`text-lg font-bold mb-8 flex items-center gap-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            <Settings size={22} className="text-indigo-500" /> Timeline Parameters
-          </h3>
+        <div className={`${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'} p-6 md:p-8 rounded-3xl border transition-colors`}>
+          <div className="flex items-center gap-2 mb-6">
+            <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+              <Settings size={18} />
+            </div>
+            <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              Timeline Parameters
+            </h3>
+          </div>
           <ParameterInput label="Current Age" help="Your age at the start of the projection." value={data.currentAge} min={18} max={80} step={1} suffix=" yrs" onChange={(v: number) => updateData('currentAge', v)} theme={theme} />
           <ParameterInput label="Retirement Age" help="The age at which you plan to stop working and start living off your assets." value={data.retirementAge} min={data.currentAge} max={90} step={1} suffix=" yrs" onChange={(v: number) => updateData('retirementAge', v)} theme={theme} />
           <ParameterInput label="Life Expectancy" help="The final age used for the projection. Calculations will run until this year." value={data.lifeExpectancy} min={data.retirementAge} max={110} step={1} suffix=" yrs" onChange={(v: number) => updateData('lifeExpectancy', v)} theme={theme} />
         </div>
-        <div className={`${isDark ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-8 rounded-3xl border shadow-xl backdrop-blur-sm transition-colors duration-300`}>
-          <h3 className={`text-lg font-bold mb-8 flex items-center gap-3 ${isDark ? 'text-white' : 'text-slate-900'}`}>
-            <TrendingUp size={22} className="text-emerald-500" /> Economic Forecast
-          </h3>
+        <div className={`${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'} p-6 md:p-8 rounded-3xl border transition-colors`}>
+          <div className="flex items-center gap-2 mb-6">
+            <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+              <TrendingUp size={18} />
+            </div>
+            <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              Economic Forecast
+            </h3>
+          </div>
           <ParameterInput label="Annual Inflation Rate" help="The expected annual increase in the cost of living. Default is 2.5%." value={data.inflationRate} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('inflationRate', v)} theme={theme} />
           <ParameterInput label="Income Growth (Pre-Retirement)" help="The annual percentage increase you expect in your income streams." value={data.incomeGrowthRate} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('incomeGrowthRate', v)} theme={theme} />
           <ParameterInput label="Portfolio Return (Post-Retirement)" help="Expected annual yield on your combined wealth after you retire." value={data.postRetirementReturn} min={0} max={15} step={0.1} suffix="%" onChange={(v: number) => updateData('postRetirementReturn', v)} theme={theme} />

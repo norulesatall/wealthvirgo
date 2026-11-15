@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { FinancialState, Income, Expense, CURRENCIES, MONTHS, formatCurrency, safeFloat } from '../types/finance';
+import { calculateAnnualTax } from '../utils/taxCalculator';
 
 interface CashflowTabProps {
   data: FinancialState;
@@ -25,12 +26,16 @@ interface CashflowTabProps {
 
 export default function CashflowTab({ data, updateData, theme, convertToBase }: CashflowTabProps) {
   const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
 
   // Income form state
   const [incomeName, setIncomeName] = useState('');
   const [incomeAmount, setIncomeAmount] = useState<string>('');
   const [incomeFrequency, setIncomeFrequency] = useState<'Monthly' | 'Quarterly' | 'Yearly'>('Monthly');
   const [incomeCurrency, setIncomeCurrency] = useState(data.baseCurrency || 'USD');
+  const [hasIncomeSchedule, setHasIncomeSchedule] = useState(false);
+  const [incomeStartYear, setIncomeStartYear] = useState<number>(currentYear + 1);
+  const [incomeEndYear, setIncomeEndYear] = useState<number>(currentYear + 5);
   const [editingIncomeId, setEditingIncomeId] = useState<string | null>(null);
 
   // Expense form state
@@ -39,8 +44,10 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
   const [expenseFrequency, setExpenseFrequency] = useState<'Monthly' | 'Quarterly' | 'Yearly'>('Monthly');
   const [expenseCurrency, setExpenseCurrency] = useState(data.baseCurrency || 'USD');
   const [hasExpenseEndDate, setHasExpenseEndDate] = useState(false);
+  const [expenseStartMonth, setExpenseStartMonth] = useState<number>(1);
+  const [expenseStartYear, setExpenseStartYear] = useState<number>(currentYear + 1);
   const [expenseLastMonth, setExpenseLastMonth] = useState<number>(12);
-  const [expenseLastYear, setExpenseLastYear] = useState<number>(currentYear + 3);
+  const [expenseLastYear, setExpenseLastYear] = useState<number>(currentYear + 5);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
 
   // Year options for expense cutoff
@@ -62,21 +69,54 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
 
   const monthlyGrossIncome = useMemo(() => {
     return (data.incomes || []).reduce((sum, item) => {
+      const startYr = safeFloat(item.startYear);
+      const endYr = safeFloat(item.endYear);
+      if ((startYr > 0 && currentYear < startYr) || (endYr > 0 && currentYear > endYr)) {
+        return sum;
+      }
       const annualBase = convertToBase(item.amount * getMultiplier(item.frequency), item.currency);
       return sum + (annualBase / 12);
     }, 0);
-  }, [data.incomes, convertToBase]);
+  }, [data.incomes, convertToBase, currentYear]);
+
+  const scheduledFutureIncomesCount = useMemo(() => {
+    return (data.incomes || []).filter(item => safeFloat(item.startYear) > currentYear).length;
+  }, [data.incomes, currentYear]);
 
   const monthlyLivingExpenses = useMemo(() => {
     return (data.expenses || []).reduce((sum, item) => {
+      const startYr = safeFloat(item.startYear);
+      const startMo = safeFloat(item.startMonth) || 1;
+      const endYr = safeFloat(item.lastPaymentYear);
+      const endMo = safeFloat(item.lastPaymentMonth) || 12;
+      const isBeforeStart = startYr > 0 && (currentYear < startYr || (currentYear === startYr && currentMonth < startMo));
+      const isAfterEnd = endYr > 0 && (currentYear > endYr || (currentYear === endYr && currentMonth > endMo));
+      if (isBeforeStart || isAfterEnd) {
+        return sum;
+      }
       const annualBase = convertToBase(item.amount * getMultiplier(item.frequency), item.currency);
       return sum + (annualBase / 12);
     }, 0);
-  }, [data.expenses, convertToBase]);
+  }, [data.expenses, convertToBase, currentYear, currentMonth]);
 
-  const monthlySurplus = monthlyGrossIncome - monthlyLivingExpenses;
-  const savingsRate = monthlyGrossIncome > 0 
-    ? Math.max(0, Math.min(100, (monthlySurplus / monthlyGrossIncome) * 100)) 
+  const scheduledFutureExpensesCount = useMemo(() => {
+    return (data.expenses || []).filter(item => {
+      const startYr = safeFloat(item.startYear);
+      const startMo = safeFloat(item.startMonth) || 1;
+      return startYr > currentYear || (startYr === currentYear && startMo > currentMonth);
+    }).length;
+  }, [data.expenses, currentYear, currentMonth]);
+
+  const taxPreview = useMemo(
+    () => calculateAnnualTax(monthlyGrossIncome * 12, data.taxConfig, convertToBase, 1),
+    [monthlyGrossIncome, data.taxConfig, convertToBase]
+  );
+  const monthlyTax = taxPreview.totalTax / 12;
+  const monthlyNetIncome = taxPreview.netIncome / 12;
+
+  const monthlySurplus = monthlyNetIncome - monthlyLivingExpenses;
+  const savingsRate = monthlyNetIncome > 0 
+    ? Math.max(0, Math.min(100, (monthlySurplus / monthlyNetIncome) * 100)) 
     : 0;
 
   // Handlers for Income
@@ -85,10 +125,23 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
     const amountNum = safeFloat(incomeAmount);
     if (!incomeName.trim() || amountNum <= 0) return;
 
+    const resolvedStartYear = hasIncomeSchedule && incomeStartYear > 0 ? incomeStartYear : undefined;
+    const resolvedEndYear = hasIncomeSchedule && incomeEndYear > 0
+      ? (resolvedStartYear ? Math.max(resolvedStartYear, incomeEndYear) : incomeEndYear)
+      : undefined;
+
     if (editingIncomeId) {
       const updated = (data.incomes || []).map(inc => 
         inc.id === editingIncomeId 
-          ? { ...inc, name: incomeName.trim(), amount: amountNum, frequency: incomeFrequency, currency: incomeCurrency }
+          ? { 
+              ...inc, 
+              name: incomeName.trim(), 
+              amount: amountNum, 
+              frequency: incomeFrequency, 
+              currency: incomeCurrency,
+              startYear: resolvedStartYear,
+              endYear: resolvedEndYear
+            }
           : inc
       );
       updateData('incomes', updated);
@@ -99,13 +152,18 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
         name: incomeName.trim(),
         amount: amountNum,
         frequency: incomeFrequency,
-        currency: incomeCurrency
+        currency: incomeCurrency,
+        startYear: resolvedStartYear,
+        endYear: resolvedEndYear
       };
       updateData('incomes', [...(data.incomes || []), newItem]);
     }
 
     setIncomeName('');
     setIncomeAmount('');
+    setHasIncomeSchedule(false);
+    setIncomeStartYear(currentYear + 1);
+    setIncomeEndYear(currentYear + 5);
   };
 
   const startEditIncome = (inc: Income) => {
@@ -114,12 +172,24 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
     setIncomeAmount(inc.amount.toString());
     setIncomeFrequency(inc.frequency);
     setIncomeCurrency(inc.currency || data.baseCurrency);
+    if ((inc.startYear && inc.startYear > 0) || (inc.endYear && inc.endYear > 0)) {
+      setHasIncomeSchedule(true);
+      setIncomeStartYear(inc.startYear || 0);
+      setIncomeEndYear(inc.endYear || 0);
+    } else {
+      setHasIncomeSchedule(false);
+      setIncomeStartYear(currentYear + 1);
+      setIncomeEndYear(currentYear + 5);
+    }
   };
 
   const cancelEditIncome = () => {
     setEditingIncomeId(null);
     setIncomeName('');
     setIncomeAmount('');
+    setHasIncomeSchedule(false);
+    setIncomeStartYear(currentYear + 1);
+    setIncomeEndYear(currentYear + 5);
   };
 
   const deleteIncome = (id: string) => {
@@ -133,6 +203,17 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
     const amountNum = safeFloat(expenseAmount);
     if (!expenseName.trim() || amountNum <= 0) return;
 
+    const resolvedStartYear = hasExpenseEndDate && expenseStartYear > 0 ? expenseStartYear : undefined;
+    const resolvedStartMonth = resolvedStartYear ? expenseStartMonth : undefined;
+    const resolvedEndYear = hasExpenseEndDate && expenseLastYear > 0
+      ? (resolvedStartYear ? Math.max(resolvedStartYear, expenseLastYear) : expenseLastYear)
+      : undefined;
+    const resolvedLastMonth = resolvedEndYear
+      ? (resolvedStartYear && resolvedEndYear === resolvedStartYear && resolvedStartMonth
+          ? Math.max(resolvedStartMonth, expenseLastMonth)
+          : expenseLastMonth)
+      : undefined;
+
     if (editingExpenseId) {
       const updated = (data.expenses || []).map(exp => 
         exp.id === editingExpenseId 
@@ -142,8 +223,10 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
               amount: amountNum, 
               frequency: expenseFrequency, 
               currency: expenseCurrency,
-              lastPaymentMonth: hasExpenseEndDate ? expenseLastMonth : undefined,
-              lastPaymentYear: hasExpenseEndDate ? expenseLastYear : undefined
+              startMonth: resolvedStartMonth,
+              startYear: resolvedStartYear,
+              lastPaymentMonth: resolvedLastMonth,
+              lastPaymentYear: resolvedEndYear
             }
           : exp
       );
@@ -156,8 +239,10 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
         amount: amountNum,
         frequency: expenseFrequency,
         currency: expenseCurrency,
-        lastPaymentMonth: hasExpenseEndDate ? expenseLastMonth : undefined,
-        lastPaymentYear: hasExpenseEndDate ? expenseLastYear : undefined
+        startMonth: resolvedStartMonth,
+        startYear: resolvedStartYear,
+        lastPaymentMonth: resolvedLastMonth,
+        lastPaymentYear: resolvedEndYear
       };
       updateData('expenses', [...(data.expenses || []), newItem]);
     }
@@ -165,6 +250,10 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
     setExpenseName('');
     setExpenseAmount('');
     setHasExpenseEndDate(false);
+    setExpenseStartMonth(1);
+    setExpenseStartYear(currentYear + 1);
+    setExpenseLastMonth(12);
+    setExpenseLastYear(currentYear + 5);
   };
 
   const startEditExpense = (exp: Expense) => {
@@ -173,12 +262,18 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
     setExpenseAmount(exp.amount.toString());
     setExpenseFrequency(exp.frequency);
     setExpenseCurrency(exp.currency || data.baseCurrency);
-    if (exp.lastPaymentYear && exp.lastPaymentYear > 0) {
+    if ((exp.startYear && exp.startYear > 0) || (exp.lastPaymentYear && exp.lastPaymentYear > 0)) {
       setHasExpenseEndDate(true);
+      setExpenseStartMonth(exp.startMonth || 1);
+      setExpenseStartYear(exp.startYear || 0);
       setExpenseLastMonth(exp.lastPaymentMonth || 12);
-      setExpenseLastYear(exp.lastPaymentYear);
+      setExpenseLastYear(exp.lastPaymentYear || 0);
     } else {
       setHasExpenseEndDate(false);
+      setExpenseStartMonth(1);
+      setExpenseStartYear(currentYear + 1);
+      setExpenseLastMonth(12);
+      setExpenseLastYear(currentYear + 5);
     }
   };
 
@@ -187,6 +282,10 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
     setExpenseName('');
     setExpenseAmount('');
     setHasExpenseEndDate(false);
+    setExpenseStartMonth(1);
+    setExpenseStartYear(currentYear + 1);
+    setExpenseLastMonth(12);
+    setExpenseLastYear(currentYear + 5);
   };
 
   const deleteExpense = (id: string) => {
@@ -205,20 +304,20 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
             <div className="flex items-center gap-2">
-              <span className={`text-[11px] font-black uppercase tracking-widest ${
+              <span className={`text-[10px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
                 Step 2 · Working Cash Dynamics
               </span>
               <span className="text-slate-400">·</span>
-              <span className="text-xs text-slate-500">Ages {data.currentAge} to {data.retirementAge}</span>
+              <span className="text-[11px] text-slate-500">Ages {data.currentAge} to {data.retirementAge}</span>
             </div>
-            <h2 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
+            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${
               isDark ? 'text-white' : 'text-slate-900'
             }`}>
               What does your everyday cash flow look like?
             </h2>
-            <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
               Financial independence is fueled by your active savings surplus. Tell us what flows in and out during your working career before you step into retirement.
             </p>
           </div>
@@ -253,10 +352,27 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                   style={{ width: `${Math.min(100, Math.max(0, savingsRate))}%` }}
                 />
               </div>
-              <div className="flex justify-between text-[10px] text-slate-500 pt-1 font-mono tabular-nums">
-                <span>In: {formatCurrency(monthlyGrossIncome, data.baseCurrency)}</span>
-                <span>Out: {formatCurrency(monthlyLivingExpenses, data.baseCurrency)}</span>
+              <div className="flex justify-between text-[10px] text-slate-500 pt-1 font-mono tabular-nums gap-2 flex-wrap">
+                {monthlyTax > 0 ? (
+                  <>
+                    <span>Net In: {formatCurrency(monthlyNetIncome, data.baseCurrency)}</span>
+                    <span className="text-amber-500">Tax: -{formatCurrency(monthlyTax, data.baseCurrency)}</span>
+                    <span>Out: {formatCurrency(monthlyLivingExpenses, data.baseCurrency)}</span>
+                  </>
+                ) : (
+                  <>
+                    <span>In: {formatCurrency(monthlyGrossIncome, data.baseCurrency)}</span>
+                    <span>Out: {formatCurrency(monthlyLivingExpenses, data.baseCurrency)}</span>
+                  </>
+                )}
               </div>
+              {(scheduledFutureIncomesCount > 0 || scheduledFutureExpensesCount > 0) && (
+                <div className="text-[10px] text-indigo-400 pt-0.5">
+                  {scheduledFutureIncomesCount > 0 && `+${scheduledFutureIncomesCount} future income${scheduledFutureIncomesCount > 1 ? 's' : ''}`}
+                  {scheduledFutureIncomesCount > 0 && scheduledFutureExpensesCount > 0 && ' · '}
+                  {scheduledFutureExpensesCount > 0 && `+${scheduledFutureExpensesCount} future expense${scheduledFutureExpensesCount > 1 ? 's' : ''}`}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -275,12 +391,12 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
               <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
                 <TrendingUp size={18} />
               </div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 What money flows in before you retire?
               </h3>
             </div>
             <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
-              Log your primary salary, side business, rentals, or dividends. These grow annually by your <strong>{data.incomeGrowthRate || 3.0}%</strong> pre-retirement wage growth parameter.
+              Log your primary salary, side business, rentals, or dividends. Optionally schedule a future start year and end year. These grow annually by your <strong>{data.incomeGrowthRate || 3.0}%</strong> wage growth parameter.
             </p>
           </div>
 
@@ -405,6 +521,65 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                   ))}
                 </div>
               </div>
+
+              {/* Optional Start & End Year Schedule */}
+              <div className="sm:col-span-2 pt-2 border-t border-slate-800/10 dark:border-slate-800/50">
+                <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
+                  <input
+                    type="checkbox"
+                    checked={hasIncomeSchedule}
+                    onChange={(e) => setHasIncomeSchedule(e.target.checked)}
+                    className="rounded border-slate-700 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
+                    Does this income start after a particular year or end in a particular year?
+                  </span>
+                </label>
+
+                {hasIncomeSchedule && (
+                  <div className="grid grid-cols-2 gap-3 mt-3">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1">Start Year</label>
+                      <select
+                        value={incomeStartYear}
+                        onChange={(e) => {
+                          const nextStart = parseInt(e.target.value);
+                          setIncomeStartYear(nextStart);
+                          if (incomeEndYear > 0 && nextStart > 0 && incomeEndYear < nextStart) {
+                            setIncomeEndYear(nextStart);
+                          }
+                        }}
+                        className={`w-full p-2 rounded-xl text-xs border ${
+                          isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                        }`}
+                      >
+                        <option value={0}>Immediately ({currentYear})</option>
+                        {yearOptions.map(y => (
+                          <option key={y} value={y}>{y}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-500 mb-1">End Year</label>
+                      <select
+                        value={incomeEndYear}
+                        onChange={(e) => setIncomeEndYear(parseInt(e.target.value))}
+                        className={`w-full p-2 rounded-xl text-xs border ${
+                          isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                        }`}
+                      >
+                        <option value={0}>Until Retirement</option>
+                        {yearOptions
+                          .filter(y => incomeStartYear === 0 || y >= incomeStartYear)
+                          .map(y => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                      </select>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <button
@@ -445,9 +620,14 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className={`font-bold text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        <span className={`font-bold text-[13px] truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
                           {inc.name}
                         </span>
+                        {inc.startYear && inc.startYear > currentYear && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 shrink-0">
+                            Scheduled
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                         <span className="font-mono font-bold tabular-nums text-emerald-500">
@@ -457,6 +637,22 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                         <span className="font-mono tabular-nums text-[11px]">
                           ~{formatCurrency(annualInBase, data.baseCurrency)} / yr
                         </span>
+                        <span aria-hidden="true">·</span>
+                        {inc.startYear && inc.endYear ? (
+                          <span className="text-indigo-400 font-medium text-[11px]">
+                            {inc.startYear} – {inc.endYear}
+                          </span>
+                        ) : inc.startYear ? (
+                          <span className="text-indigo-400 font-medium text-[11px]">
+                            Starts {inc.startYear} · Until retirement
+                          </span>
+                        ) : inc.endYear ? (
+                          <span className="text-amber-500 font-medium text-[11px]">
+                            Ends {inc.endYear}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-slate-400">Active until retirement</span>
+                        )}
                       </div>
                     </div>
 
@@ -507,7 +703,7 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
               <div className={`p-2 rounded-xl ${isDark ? 'bg-rose-500/10 text-rose-400' : 'bg-rose-50 text-rose-600'}`}>
                 <DollarSign size={18} />
               </div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 What are your regular living expenses today?
               </h3>
             </div>
@@ -636,7 +832,7 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                 </div>
               </div>
 
-              {/* Optional End Date Checkbox / Toggle */}
+              {/* Optional Start & End Year Schedule */}
               <div className="sm:col-span-2 pt-2 border-t border-slate-800/10 dark:border-slate-800/50">
                 <label className="flex items-center gap-2 cursor-pointer select-none text-xs">
                   <input
@@ -646,40 +842,107 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                     className="rounded border-slate-700 text-rose-600 focus:ring-rose-500"
                   />
                   <span className={isDark ? 'text-slate-300' : 'text-slate-700'}>
-                    Does this expense end before retirement? (e.g. loan payoff, temporary lease)
+                    Does this expense start after a particular year or end at a particular year?
                   </span>
                 </label>
 
                 {hasExpenseEndDate && (
-                  <div className="grid grid-cols-2 gap-3 mt-3">
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 mb-1">Last Payment Month</label>
-                      <select
-                        value={expenseLastMonth}
-                        onChange={(e) => setExpenseLastMonth(parseInt(e.target.value))}
-                        className={`w-full p-2 rounded-xl text-xs border ${
-                          isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
-                        }`}
-                      >
-                        {MONTHS.map((m, idx) => (
-                          <option key={m} value={idx + 1}>{m}</option>
-                        ))}
-                      </select>
+                  <div className="space-y-3 mt-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1">Start Year</label>
+                        <select
+                          value={expenseStartYear}
+                          onChange={(e) => {
+                            const nextStart = parseInt(e.target.value);
+                            setExpenseStartYear(nextStart);
+                            if (expenseLastYear > 0 && nextStart > 0 && expenseLastYear < nextStart) {
+                              setExpenseLastYear(nextStart);
+                            }
+                            if (expenseLastYear > 0 && nextStart === expenseLastYear && expenseLastMonth < expenseStartMonth) {
+                              setExpenseLastMonth(expenseStartMonth);
+                            }
+                          }}
+                          className={`w-full p-2 rounded-xl text-xs border ${
+                            isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                          }`}
+                        >
+                          <option value={0}>Immediately ({currentYear})</option>
+                          {yearOptions.map(y => (
+                            <option key={y} value={y}>{y}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {expenseStartYear > 0 && (
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">Start Month (in {expenseStartYear})</label>
+                          <select
+                            value={expenseStartMonth}
+                            onChange={(e) => {
+                              const nextMonth = parseInt(e.target.value);
+                              setExpenseStartMonth(nextMonth);
+                              if (expenseLastYear > 0 && expenseStartYear === expenseLastYear && expenseLastMonth < nextMonth) {
+                                setExpenseLastMonth(nextMonth);
+                              }
+                            }}
+                            className={`w-full p-2 rounded-xl text-xs border ${
+                              isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                            }`}
+                          >
+                            {MONTHS.map((m, idx) => (
+                              <option key={m} value={idx + 1}>{m}</option>
+                            ))}
+                          </select>
+                        </div>
+                      )}
                     </div>
 
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-500 mb-1">Last Payment Year</label>
-                      <select
-                        value={expenseLastYear}
-                        onChange={(e) => setExpenseLastYear(parseInt(e.target.value))}
-                        className={`w-full p-2 rounded-xl text-xs border ${
-                          isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
-                        }`}
-                      >
-                        {yearOptions.map(y => (
-                          <option key={y} value={y}>{y}</option>
-                        ))}
-                      </select>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500 mb-1">End Year</label>
+                        <select
+                          value={expenseLastYear}
+                          onChange={(e) => {
+                            const nextEnd = parseInt(e.target.value);
+                            setExpenseLastYear(nextEnd);
+                            if (expenseStartYear > 0 && nextEnd === expenseStartYear && expenseLastMonth < expenseStartMonth) {
+                              setExpenseLastMonth(expenseStartMonth);
+                            }
+                          }}
+                          className={`w-full p-2 rounded-xl text-xs border ${
+                            isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                          }`}
+                        >
+                          <option value={0}>Until Retirement</option>
+                          {yearOptions
+                            .filter(y => expenseStartYear === 0 || y >= expenseStartYear)
+                            .map(y => (
+                              <option key={y} value={y}>{y}</option>
+                            ))}
+                        </select>
+                      </div>
+
+                      {expenseLastYear > 0 && (
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500 mb-1">Last Payment Month (in {expenseLastYear})</label>
+                          <select
+                            value={expenseLastMonth}
+                            onChange={(e) => setExpenseLastMonth(parseInt(e.target.value))}
+                            className={`w-full p-2 rounded-xl text-xs border ${
+                              isDark ? 'bg-slate-900 border-slate-700 text-white' : 'bg-white border-slate-200 text-slate-900 shadow-sm'
+                            }`}
+                          >
+                            {MONTHS.map((m, idx) => {
+                              const monthNum = idx + 1;
+                              const disabled = expenseStartYear > 0 && expenseLastYear === expenseStartYear && monthNum < expenseStartMonth;
+                              return (
+                                <option key={m} value={monthNum} disabled={disabled}>{m}</option>
+                              );
+                            })}
+                          </select>
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -724,9 +987,14 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                   >
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className={`font-bold text-sm truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                        <span className={`font-bold text-[13px] truncate ${isDark ? 'text-white' : 'text-slate-900'}`}>
                           {exp.name}
                         </span>
+                        {exp.startYear && (exp.startYear > currentYear || (exp.startYear === currentYear && (exp.startMonth || 1) > currentMonth)) && (
+                          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500/10 text-rose-400 border border-rose-500/20 shrink-0">
+                            Scheduled
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-slate-500 flex-wrap">
                         <span className="font-mono font-bold tabular-nums text-rose-500">
@@ -736,18 +1004,21 @@ export default function CashflowTab({ data, updateData, theme, convertToBase }: 
                         <span className="font-mono tabular-nums text-[11px]">
                           ~{formatCurrency(annualInBase, data.baseCurrency)} / yr
                         </span>
-                        {exp.lastPaymentYear && exp.lastPaymentYear > 0 ? (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="text-amber-500 font-medium text-[11px]">
-                              Ceases {MONTHS[(exp.lastPaymentMonth || 12) - 1]} {exp.lastPaymentYear}
-                            </span>
-                          </>
+                        <span aria-hidden="true">·</span>
+                        {exp.startYear && exp.lastPaymentYear ? (
+                          <span className="text-amber-500 font-medium text-[11px]">
+                            {MONTHS[(exp.startMonth || 1) - 1].slice(0, 3)} {exp.startYear} – {MONTHS[(exp.lastPaymentMonth || 12) - 1].slice(0, 3)} {exp.lastPaymentYear}
+                          </span>
+                        ) : exp.startYear ? (
+                          <span className="text-indigo-400 font-medium text-[11px]">
+                            Starts {MONTHS[(exp.startMonth || 1) - 1].slice(0, 3)} {exp.startYear} · Until retirement
+                          </span>
+                        ) : exp.lastPaymentYear && exp.lastPaymentYear > 0 ? (
+                          <span className="text-amber-500 font-medium text-[11px]">
+                            Ceases {MONTHS[(exp.lastPaymentMonth || 12) - 1]} {exp.lastPaymentYear}
+                          </span>
                         ) : (
-                          <>
-                            <span aria-hidden="true">·</span>
-                            <span className="text-[11px] text-slate-400">Ceases at retirement</span>
-                          </>
+                          <span className="text-[11px] text-slate-400">Ceases at retirement</span>
                         )}
                       </div>
                     </div>

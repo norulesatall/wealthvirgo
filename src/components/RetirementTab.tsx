@@ -170,20 +170,20 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
         <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
           <div className="space-y-2 max-w-2xl">
             <div className="flex items-center gap-2">
-              <span className={`text-[11px] font-black uppercase tracking-widest ${
+              <span className={`text-[10px] font-black uppercase tracking-widest ${
                 isDark ? 'text-indigo-400' : 'text-indigo-600'
               }`}>
-                Step 5 · Freedom Blueprint
+                Step 6 · Freedom Blueprint
               </span>
               <span className="text-slate-400">·</span>
-              <span className="text-xs text-slate-500">Retirement Strategy</span>
+              <span className="text-[11px] text-slate-500">Retirement Strategy</span>
             </div>
-            <h2 className={`text-2xl md:text-3xl font-extrabold tracking-tight ${
+            <h2 className={`text-lg md:text-xl font-bold tracking-tight ${
               isDark ? 'text-white' : 'text-slate-900'
             }`}>
               What does your dream retirement look like?
             </h2>
-            <p className={`text-xs md:text-sm ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+            <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
               Design the monthly lifestyle budget you need and any extra bucket-list dreams or reserves starting at age <strong>{data.retirementAge}</strong>.
             </p>
           </div>
@@ -196,7 +196,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
               <span>Target FI/RE Nest Egg</span>
               <span className="text-indigo-400">@{swrRate}% SWR</span>
             </div>
-            <div className="text-2xl font-black font-mono tabular-nums tracking-tight text-indigo-500">
+            <div className="text-lg md:text-xl font-black font-mono tabular-nums tracking-tight text-indigo-500">
               {formatCurrency(targetNestEgg, data.baseCurrency)}
             </div>
             <div className="text-[11px] text-slate-500 mt-2 flex items-center justify-between">
@@ -219,7 +219,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
               <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
                 <DollarSign size={18} />
               </div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 Question 1: What monthly lifestyle budget will give you peace of mind?
               </h3>
             </div>
@@ -372,7 +372,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
                   }`}
                 >
                   <div className="space-y-1">
-                    <span className={`font-bold text-sm block ${isDark ? 'text-white' : 'text-slate-900'}`}>{exp.name}</span>
+                    <span className={`font-bold text-[13px] block ${isDark ? 'text-white' : 'text-slate-900'}`}>{exp.name}</span>
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <span className="font-mono font-bold tabular-nums text-indigo-500">
                         {formatCurrency(exp.amount, exp.currency)} / {exp.type.toLowerCase().replace('ly', '')}
@@ -413,7 +413,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
               <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
                 <Sparkles size={18} />
               </div>
-              <h3 className={`text-lg md:text-xl font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+              <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
                 Question 2: Any extra bucket-list dreams or healthcare buffers?
               </h3>
             </div>
@@ -546,7 +546,7 @@ export default function RetirementTab({ data, updateData, theme, convertToBase, 
                   }`}
                 >
                   <div className="space-y-1">
-                    <span className={`font-bold text-sm block ${isDark ? 'text-white' : 'text-slate-900'}`}>{exp.name}</span>
+                    <span className={`font-bold text-[13px] block ${isDark ? 'text-white' : 'text-slate-900'}`}>{exp.name}</span>
                     <div className="flex items-center gap-2 text-xs text-slate-500">
                       <span className="font-mono font-bold tabular-nums text-emerald-500">
                         {formatCurrency(exp.amount, exp.currency)} (Lump Sum)
