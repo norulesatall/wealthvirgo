@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useRef, memo, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useMemo, useRef, memo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import CryptoJS from 'crypto-js';
 import { 
@@ -281,7 +281,10 @@ export default function App() {
       .filter(e => e.type === 'Lump Sum')
       .reduce((s, e) => s + convertToBase(e.amount, e.currency), 0);
 
-    const yearlyData = [];
+    const truncateLabel = (txt: string, max = 14) =>
+      txt && txt.length > max ? txt.slice(0, max - 1) + '…' : (txt || '');
+
+    const yearlyData: any[] = [];
     let rollingBaseAssets = liquidAssets;
     let activeFutureAssets = [...futureAssets];
     let runwayEnded = false;
@@ -296,6 +299,13 @@ export default function App() {
 
       const isRetired = age >= data.retirementAge;
       const isFirstYearRetirement = age === data.retirementAge;
+      const yearEvents: Array<{
+        type: 'retirement' | 'lump_sum' | 'goal' | 'maturity' | 'crossover' | 'cashflow' | 'depletion';
+        title: string;
+        shortLabel: string;
+        amount?: number;
+        color: string;
+      }> = [];
 
       const startFutureAssetSum = activeFutureAssets.reduce((s, a) => s + a.baseAmount, 0);
       const startInvSum = activeInvestments.reduce((s, i) => s + i.baseBalance, 0);
@@ -321,13 +331,76 @@ export default function App() {
           const end = safeFloat(goal.endYear) || start;
           if (targetYear >= start) {
             if (goal.frequency === 'Lump Sum') {
-              if (targetYear === start) currentYearGoalExpense += goal.baseAmount * inflationMultiplier;
+              if (targetYear === start) {
+                const nominalCost = goal.baseAmount * inflationMultiplier;
+                currentYearGoalExpense += nominalCost;
+                yearEvents.push({
+                  type: 'goal',
+                  title: `Goal: ${goal.name}`,
+                  shortLabel: `Goal: ${truncateLabel(goal.name)}`,
+                  amount: -nominalCost,
+                  color: '#f59e0b'
+                });
+              }
             } else if (targetYear <= end) {
-              currentYearGoalExpense += (goal.baseAmount * getFrequencyMultiplier(goal.frequency)) * inflationMultiplier;
+              const annualGoalCost = (goal.baseAmount * getFrequencyMultiplier(goal.frequency)) * inflationMultiplier;
+              currentYearGoalExpense += annualGoalCost;
+              if (targetYear === start) {
+                yearEvents.push({
+                  type: 'goal',
+                  title: `Goal Starts: ${goal.name} (${start}–${end})`,
+                  shortLabel: `Goal: ${truncateLabel(goal.name)}`,
+                  amount: -annualGoalCost,
+                  color: '#f59e0b'
+                });
+              }
             }
           }
         });
       }
+
+      // Track explicitly scheduled future income & expense start/end milestones
+      (data.incomes || []).forEach((inc: any) => {
+        const sYr = safeFloat(inc.startYear);
+        const eYr = safeFloat(inc.endYear);
+        if (sYr > currentYear && sYr === targetYear) {
+          yearEvents.push({
+            type: 'cashflow',
+            title: `Income Starts: ${inc.name}`,
+            shortLabel: `+ ${truncateLabel(inc.name)}`,
+            color: '#06b6d4'
+          });
+        }
+        if (eYr > currentYear && eYr === targetYear && !isRetired) {
+          yearEvents.push({
+            type: 'cashflow',
+            title: `Income Ends: ${inc.name}`,
+            shortLabel: `End: ${truncateLabel(inc.name)}`,
+            color: '#06b6d4'
+          });
+        }
+      });
+
+      (data.expenses || []).forEach((exp: any) => {
+        const sYr = safeFloat(exp.startYear);
+        const eYr = safeFloat(exp.lastPaymentYear);
+        if (sYr > currentYear && sYr === targetYear) {
+          yearEvents.push({
+            type: 'cashflow',
+            title: `Expense Starts: ${exp.name}`,
+            shortLabel: `Exp: ${truncateLabel(exp.name)}`,
+            color: '#06b6d4'
+          });
+        }
+        if (eYr > currentYear && eYr === targetYear) {
+          yearEvents.push({
+            type: 'cashflow',
+            title: `Expense Payoff: ${exp.name}`,
+            shortLabel: `Paid: ${truncateLabel(exp.name)}`,
+            color: '#06b6d4'
+          });
+        }
+      });
 
       let yearEndInvSum = 0;
       let maturedSum = 0;
@@ -336,9 +409,17 @@ export default function App() {
       // 2. Asset Maturity Check (processes for both working years and retirement years!)
       activeFutureAssets = activeFutureAssets.filter(asset => {
         if (targetYear >= asset.maturityYear) {
-          maturedSum += asset.isMaturityPortfolio 
+          const payout = asset.isMaturityPortfolio 
             ? convertToBase(asset.amount, asset.currency)
             : asset.baseAmount;
+          maturedSum += payout;
+          yearEvents.push({
+            type: 'maturity',
+            title: `Asset Matures: ${asset.name}`,
+            shortLabel: `Matures: ${truncateLabel(asset.name)}`,
+            amount: payout,
+            color: '#10b981'
+          });
           return false;
         }
         
@@ -399,6 +480,13 @@ export default function App() {
 
           if (targetYear >= maturityYear) {
             maturedSum += inv.baseBalance;
+            yearEvents.push({
+              type: 'maturity',
+              title: `Portfolio Matures: ${inv.name}`,
+              shortLabel: `Matures: ${truncateLabel(inv.name)}`,
+              amount: inv.baseBalance,
+              color: '#10b981'
+            });
             inv.matured = true;
           } else {
             yearEndInvSum += inv.baseBalance;
@@ -414,6 +502,26 @@ export default function App() {
           rollingBaseAssets += finalInvSum - (totalRetirementLumpSumBase * inflationMultiplier);
           activeInvestments.forEach(inv => inv.baseBalance = 0);
           combinedPoolAtRetirement = rollingBaseAssets / inflationMultiplier;
+
+          yearEvents.push({
+            type: 'retirement',
+            title: 'Retirement Milestone',
+            shortLabel: 'Retire',
+            color: '#6366f1'
+          });
+
+          (data.retirementExpenses || [])
+            .filter(re => re.type === 'Lump Sum')
+            .forEach(re => {
+              const lumpAmt = convertToBase(re.amount, re.currency) * inflationMultiplier;
+              yearEvents.push({
+                type: 'lump_sum',
+                title: `Retirement Lump Sum: ${re.name}`,
+                shortLabel: `Lump: ${truncateLabel(re.name)}`,
+                amount: -lumpAmt,
+                color: '#ec4899'
+              });
+            });
         }
 
         const postRetirementYield = safeFloat(data.postRetirementReturn) / 100;
@@ -427,6 +535,12 @@ export default function App() {
           if (!runwayEnded) {
             runwayEnded = true;
             runwayYears = age - data.retirementAge;
+            yearEvents.push({
+              type: 'depletion',
+              title: 'Portfolio Depleted',
+              shortLabel: 'Depleted',
+              color: '#f43f5e'
+            });
           }
         }
         yearEndInvSum = 0;
@@ -451,10 +565,38 @@ export default function App() {
         income: currentYearIncome,
         goalExpense: currentYearGoalExpense,
         yearlyContributionTotal,
-         passiveGrowth,
-        isRetired
+        passiveGrowth,
+        isRetired,
+        events: yearEvents
       });
     }
+
+    // Mark FI Crossover Milestone on the first year where sustainable SWR income covers core expenses
+    const baseRetirementCostForFI = totalRetirementMonthlyBase > 0 ? totalRetirementMonthlyBase : totalExpensesBase;
+    const swrRateFrac = safeFloat(data.safeWithdrawalRate || 4.0) / 100;
+    if (baseRetirementCostForFI > 0 && swrRateFrac > 0) {
+      const crossoverRow = yearlyData.find((row) => {
+        const yearIndex = row.age - data.currentAge;
+        const infMult = Math.pow(1 + safeFloat(data.inflationRate) / 100, yearIndex);
+        return row.nominal > 0 && (row.nominal * swrRateFrac) >= (baseRetirementCostForFI * infMult);
+      });
+      if (crossoverRow) {
+        crossoverRow.events.push({
+          type: 'crossover',
+          title: 'FI Crossover (SWR ≥ Core Costs)',
+          shortLabel: 'FI Crossover',
+          color: '#10b981'
+        });
+      }
+    }
+
+    const timelineEvents = yearlyData.flatMap((row) =>
+      (row.events || []).map((ev: any) => ({
+        ...ev,
+        age: row.age,
+        year: row.year
+      }))
+    );
 
     if (!runwayEnded) {
       runwayYears = data.lifeExpectancy - data.retirementAge;
@@ -493,7 +635,7 @@ export default function App() {
       }
     });
 
-    return { yearlyData, runwayYears, runwayEnded, assetAllocation, combinedPoolAtRetirement, annualContributions, activeFutureAssets, totalRetirementMonthlyBase, totalExpensesBase };
+    return { yearlyData, timelineEvents, runwayYears, runwayEnded, assetAllocation, combinedPoolAtRetirement, annualContributions, activeFutureAssets, totalRetirementMonthlyBase, totalExpensesBase };
   }, [data, exchangeRates]);
 
   // --- HANDLERS ---
@@ -817,37 +959,74 @@ export default function App() {
 
 const Tooltip = ({ text, theme, children }: { text: string; theme: 'light' | 'dark'; children: React.ReactNode }) => {
   const [isVisible, setIsVisible] = useState(false);
-  const [coords, setCoords] = useState({ top: 0, left: 0 });
+  const [pos, setPos] = useState<{
+    top: number;
+    left: number;
+    width: number;
+    placement: 'top' | 'bottom';
+    arrowLeft: number;
+  }>({ top: 0, left: 12, width: 288, placement: 'top', arrowLeft: 144 });
   const triggerRef = useRef<HTMLDivElement>(null);
+  const tooltipRef = useRef<HTMLDivElement>(null);
 
-  const updatePosition = () => {
-    if (triggerRef.current) {
-      const rect = triggerRef.current.getBoundingClientRect();
-      setCoords({
-        top: rect.top - 10, // 10px spacing
-        left: rect.left + rect.width / 2
-      });
-    }
-  };
+  const updatePosition = useCallback(() => {
+    if (!triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const margin = 12;
+    const tooltipW = Math.min(288, Math.max(180, vw - margin * 2));
+    const measuredH = tooltipRef.current?.offsetHeight || 110;
 
-  useEffect(() => {
-    if (isVisible) {
-      updatePosition();
-      window.addEventListener('scroll', updatePosition, true);
-      window.addEventListener('resize', updatePosition);
-    }
+    const triggerCenterX = rect.left + rect.width / 2;
+    const boxLeft = Math.max(margin, Math.min(vw - tooltipW - margin, triggerCenterX - tooltipW / 2));
+    const arrowLeft = Math.max(16, Math.min(tooltipW - 16, triggerCenterX - boxLeft));
+
+    const spaceAbove = rect.top - margin;
+    const spaceBelow = vh - rect.bottom - margin;
+    const placement: 'top' | 'bottom' =
+      spaceAbove >= measuredH + 10 || spaceAbove >= spaceBelow ? 'top' : 'bottom';
+
+    let boxTop = placement === 'top' ? rect.top - measuredH - 10 : rect.bottom + 10;
+    boxTop = Math.max(margin, Math.min(vh - measuredH - margin, boxTop));
+
+    setPos({ top: boxTop, left: boxLeft, width: tooltipW, placement, arrowLeft });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!isVisible) return;
+    updatePosition();
+    const raf = requestAnimationFrame(updatePosition);
+    window.addEventListener('scroll', updatePosition, true);
+    window.addEventListener('resize', updatePosition);
     return () => {
+      cancelAnimationFrame(raf);
       window.removeEventListener('scroll', updatePosition, true);
       window.removeEventListener('resize', updatePosition);
     };
+  }, [isVisible, text, updatePosition]);
+
+  useEffect(() => {
+    if (!isVisible) return;
+    const handlePointerDown = (e: PointerEvent) => {
+      if (triggerRef.current && !triggerRef.current.contains(e.target as Node)) {
+        setIsVisible(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
   }, [isVisible]);
 
   return (
     <div className="relative inline-flex items-center group/tooltip">
-      <div 
+      <div
         ref={triggerRef}
         onMouseEnter={() => setIsVisible(true)}
         onMouseLeave={() => setIsVisible(false)}
+        onClick={(e) => {
+          e.stopPropagation();
+          setIsVisible((v) => !v);
+        }}
         className="cursor-help"
       >
         {children}
@@ -857,24 +1036,32 @@ const Tooltip = ({ text, theme, children }: { text: string; theme: 'light' | 'da
           <AnimatePresence>
             {isVisible && (
               <motion.div
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                ref={tooltipRef}
+                initial={{ opacity: 0, scale: 0.96, y: pos.placement === 'top' ? 6 : -6 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
-                style={{ 
+                exit={{ opacity: 0, scale: 0.96, y: pos.placement === 'top' ? 6 : -6 }}
+                style={{
                   position: 'fixed',
-                  top: coords.top,
-                  left: coords.left,
-                  transform: 'translate(-50%, -100%)'
+                  top: pos.top,
+                  left: pos.left,
+                  width: pos.width,
                 }}
-                className={`w-72 p-3.5 rounded-2xl border shadow-2xl text-xs leading-relaxed font-medium transition-colors ${
-                  theme === 'dark' 
-                  ? 'bg-slate-900 border-slate-700 text-slate-100 shadow-slate-950/50' 
-                  : 'bg-white border-slate-200 text-slate-850 shadow-slate-200'
+                className={`p-3.5 rounded-2xl border shadow-2xl text-xs leading-relaxed font-medium transition-colors ${
+                  theme === 'dark'
+                    ? 'bg-slate-900 border-slate-700 text-slate-100 shadow-slate-950/50'
+                    : 'bg-white border-slate-200 text-slate-800 shadow-slate-200'
                 }`}
               >
-                <div className={`absolute bottom-[-6px] left-1/2 -translate-x-1/2 w-3 h-3 border-r border-b rotate-45 ${
-                  theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
-                }`} />
+                <div
+                  style={{ left: pos.arrowLeft }}
+                  className={`absolute -translate-x-1/2 w-3 h-3 rotate-45 ${
+                    pos.placement === 'top'
+                      ? 'bottom-[-6px] border-r border-b'
+                      : 'top-[-6px] border-l border-t'
+                  } ${
+                    theme === 'dark' ? 'bg-slate-900 border-slate-700' : 'bg-white border-slate-200'
+                  }`}
+                />
                 {text}
               </motion.div>
             )}
@@ -1195,6 +1382,121 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
     const tooltipText = isDark ? '#cbd5e1' : '#1e293b';
     const tooltipBorder = isDark ? '#334155' : '#e2e8f0';
 
+    const formatEventLines = (entry: any) => {
+      if (!entry?.events?.length) return [];
+      return entry.events.map((ev: any) => {
+        const amtStr = typeof ev.amount === 'number' && ev.amount !== 0
+          ? ` (${ev.amount > 0 ? '+' : '-'}${formatCurrency(Math.abs(ev.amount), data.baseCurrency)})`
+          : '';
+        return `• ${ev.title}${amtStr}`;
+      });
+    };
+
+    const createTimelineEventsPlugin = (rows: any[], primaryDatasetIndex: number = 0) => ({
+      id: 'timelineEventsMarker',
+      afterDatasetsDraw: (chart: any) => {
+        const { ctx, chartArea } = chart;
+        if (!chartArea) return;
+        const meta = chart.getDatasetMeta(primaryDatasetIndex);
+        if (!meta?.data?.length) return;
+
+        const priorityOrder: Record<string, number> = {
+          depletion: 6,
+          lump_sum: 5,
+          retirement: 4,
+          goal: 3,
+          maturity: 2,
+          crossover: 1,
+          cashflow: 0
+        };
+
+        const laneLastRight = [-Infinity, -Infinity, -Infinity];
+
+        rows.forEach((row, idx) => {
+          const events = row?.events;
+          if (!events || events.length === 0) return;
+          const pt = meta.data[idx];
+          if (!pt) return;
+
+          const x = pt.x;
+          const y = pt.y;
+          if (x < chartArea.left || x > chartArea.right) return;
+
+          const sorted = [...events].sort((a, b) => (priorityOrder[b.type] || 0) - (priorityOrder[a.type] || 0));
+          const topEvent = sorted[0];
+          const color = topEvent.color || '#6366f1';
+
+          // Vertical dashed milestone line
+          ctx.save();
+          ctx.beginPath();
+          ctx.setLineDash([4, 4]);
+          ctx.strokeStyle = color;
+          ctx.globalAlpha = 0.45;
+          ctx.lineWidth = 1.5;
+          ctx.moveTo(x, chartArea.top + 4);
+          ctx.lineTo(x, chartArea.bottom);
+          ctx.stroke();
+          ctx.restore();
+
+          // Highlight dot on the curve
+          ctx.save();
+          ctx.beginPath();
+          ctx.arc(x, y, 5.5, 0, Math.PI * 2);
+          ctx.fillStyle = color;
+          ctx.fill();
+          ctx.lineWidth = 2;
+          ctx.strokeStyle = isDark ? '#0f172a' : '#ffffff';
+          ctx.stroke();
+          ctx.restore();
+
+          // Badge text combining events in same year cleanly
+          const labelText =
+            sorted.length === 1
+              ? sorted[0].shortLabel
+              : sorted.some(e => e.type === 'retirement') && sorted.some(e => e.type === 'lump_sum')
+                ? 'Retire · Lump Sum'
+                : `${sorted[0].shortLabel} (+${sorted.length - 1})`;
+
+          ctx.save();
+          ctx.font = 'bold 9.5px "Plus Jakarta Sans", system-ui, sans-serif';
+          const textWidth = ctx.measureText(labelText).width;
+          const pillW = textWidth + 12;
+          const pillH = 17;
+
+          let pillX = x - pillW / 2;
+          pillX = Math.max(chartArea.left + 3, Math.min(chartArea.right - pillW - 3, pillX));
+
+          // Pick non-overlapping vertical lane
+          let lane = 0;
+          for (let l = 0; l < laneLastRight.length; l++) {
+            if (pillX >= laneLastRight[l] + 6) {
+              lane = l;
+              break;
+            }
+            lane = l;
+          }
+          laneLastRight[lane] = pillX + pillW;
+          const pillY = chartArea.top + 6 + lane * 20;
+
+          if (pillY + pillH <= chartArea.bottom - 10) {
+            ctx.fillStyle = isDark ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)';
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.roundRect(pillX, pillY, pillW, pillH, 5);
+            ctx.fill();
+            ctx.stroke();
+
+            ctx.fillStyle = isDark ? '#f8fafc' : '#0f172a';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(labelText, pillX + 6, pillY + pillH / 2 + 0.5);
+          }
+          ctx.restore();
+        });
+      }
+    });
+
     if (areaChartRef.current) {
       if (areaInstance.current) areaInstance.current.destroy();
       areaInstance.current = new Chart(areaChartRef.current, {
@@ -1211,7 +1513,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               tension: 0.4,
               borderWidth: 2,
               pointRadius: 0,
-              pointHoverRadius: 4
+              pointHoverRadius: 5
             },
             { 
               label: 'Real Value (Infl. Adj.)', 
@@ -1222,10 +1524,11 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               tension: 0.4,
               borderWidth: 2,
               pointRadius: 0,
-              pointHoverRadius: 4
+              pointHoverRadius: 5
             }
           ]
         },
+        plugins: [createTimelineEventsPlugin(projection.yearlyData, 0)],
         options: { 
           responsive: true, 
           maintainAspectRatio: false, 
@@ -1260,11 +1563,16 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
                   const index = context[0].dataIndex;
                   const entry = projection.yearlyData[index];
                   if (entry) {
-                    return `Age ${entry.age}. Year ${entry.year}`;
+                    return `Age ${entry.age} · Year ${entry.year}`;
                   }
                   return `Age ${context[0].label}`;
                 },
-                label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y, data.baseCurrency)}`
+                label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y, data.baseCurrency)}`,
+                afterBody: (context) => {
+                  const entry = projection.yearlyData[context[0].dataIndex];
+                  const lines = formatEventLines(entry);
+                  return lines.length > 0 ? ['', 'Events:', ...lines] : [];
+                }
               }
             }
           }, 
@@ -1274,6 +1582,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               ticks: { color: textColor, font: { size: 10 } } 
             }, 
             y: { 
+              grace: '15%',
               ticks: { 
                 color: textColor, 
                 font: { size: 10 },
@@ -1343,7 +1652,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
 
     if (fiCrossoverChartRef.current) {
       if (fiCrossoverInstance.current) fiCrossoverInstance.current.destroy();
-      const filteredYearly = projection.yearlyData.filter((_: any, i: number) => i % 2 === 0);
+      const crossoverRows = projection.yearlyData;
 
       const totalRetirementMonthlyBase = projection.totalRetirementMonthlyBase || 0;
       const totalWorkingExpensesBase = projection.totalExpensesBase || 0;
@@ -1355,22 +1664,22 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
       fiCrossoverInstance.current = new Chart(fiCrossoverChartRef.current, {
         type: 'line',
         data: {
-          labels: filteredYearly.map((d: any) => d.age),
+          labels: crossoverRows.map((d: any) => d.age),
           datasets: [
             {
               label: `Sustainable Passive Income (${activeSWRPrice}% SWR)`,
-              data: filteredYearly.map((d: any) => d.nominal * swrFraction),
+              data: crossoverRows.map((d: any) => d.nominal * swrFraction),
               borderColor: '#10b981',
               backgroundColor: 'rgba(16, 185, 129, 0.05)',
               borderWidth: 2,
               fill: true,
               tension: 0.3,
               pointRadius: 0,
-              pointHoverRadius: 4
+              pointHoverRadius: 5
             },
             {
               label: 'Target Retirement Core Costs',
-              data: filteredYearly.map((d: any) => {
+              data: crossoverRows.map((d: any) => {
                 const yearIndex = d.age - data.currentAge;
                 const inflationMultiplier = Math.pow(1 + safeFloat(data.inflationRate) / 100, yearIndex);
                 // Draw target post-retirement core expenses tracking inflation
@@ -1382,10 +1691,11 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               fill: true,
               tension: 0.3,
               pointRadius: 0,
-              pointHoverRadius: 4
+              pointHoverRadius: 5
             }
           ]
         },
+        plugins: [createTimelineEventsPlugin(crossoverRows, 0)],
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -1414,10 +1724,15 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               footerFont: { size: 11, weight: 'bold' },
               callbacks: {
                 title: (context) => {
-                  const entry = filteredYearly[context[0].dataIndex];
-                  return entry ? `Age ${entry.age}. Year ${entry.year}` : `Age ${context[0].label}`;
+                  const entry = crossoverRows[context[0].dataIndex];
+                  return entry ? `Age ${entry.age} · Year ${entry.year}` : `Age ${context[0].label}`;
                 },
-                label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y, data.baseCurrency)}`
+                label: (context) => `${context.dataset.label}: ${formatCurrency(context.parsed.y, data.baseCurrency)}`,
+                afterBody: (context) => {
+                  const entry = crossoverRows[context[0].dataIndex];
+                  const lines = formatEventLines(entry);
+                  return lines.length > 0 ? ['', 'Events:', ...lines] : [];
+                }
               }
             }
           },
@@ -1427,6 +1742,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               ticks: { color: textColor, font: { size: 10 } }
             },
             y: {
+              grace: '15%',
               ticks: {
                 color: textColor,
                 font: { size: 10 },
@@ -1456,7 +1772,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               fill: true,
               tension: 0.3,
               pointRadius: 0,
-              pointHoverRadius: 4
+              pointHoverRadius: 5
             },
             {
               label: 'Compounded Portfolio Growth',
@@ -1467,10 +1783,11 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               fill: true,
               tension: 0.3,
               pointRadius: 0,
-              pointHoverRadius: 4
+              pointHoverRadius: 5
             }
           ]
         },
+        plugins: [createTimelineEventsPlugin(projection.yearlyData, 1)],
         options: {
           responsive: true,
           maintainAspectRatio: false,
@@ -1500,12 +1817,17 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
               callbacks: {
                 title: (context) => {
                   const entry = compoundingData[context[0].dataIndex];
-                  return entry ? `Age ${entry.age}. Year ${entry.year}` : `Age ${context[0].label}`;
+                  return entry ? `Age ${entry.age} · Year ${entry.year}` : `Age ${context[0].label}`;
                 },
                 label: (context) => {
                   const label = context.dataset.label || '';
                   const value = context.parsed.y;
                   return `${label}: ${formatCurrency(value, data.baseCurrency)}`;
+                },
+                afterBody: (context) => {
+                  const entry = projection.yearlyData[context[0].dataIndex];
+                  const lines = formatEventLines(entry);
+                  return lines.length > 0 ? ['', 'Events:', ...lines] : [];
                 },
                 footer: (context) => {
                   const entry = compoundingData[context[0].dataIndex];
@@ -1524,6 +1846,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
             },
             y: {
               stacked: true,
+              grace: '15%',
               ticks: {
                 color: textColor,
                 font: { size: 10 },
@@ -1665,6 +1988,39 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
         <div className="flex-1 h-[400px] min-h-[350px]">
           <canvas ref={areaChartRef}></canvas>
         </div>
+        {projection.timelineEvents && projection.timelineEvents.length > 0 && (
+          <div className={`mt-5 pt-4 border-t ${theme === 'dark' ? 'border-slate-700/50' : 'border-slate-100'}`}>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500 mr-1">
+                Marked Milestones:
+              </span>
+              {projection.timelineEvents.map((ev: any, idx: number) => (
+                <span
+                  key={`${ev.year}-${ev.type}-${idx}`}
+                  className={`inline-flex items-center gap-1.5 text-[11px] px-2.5 py-1 rounded-lg border font-medium ${
+                    theme === 'dark'
+                      ? 'bg-slate-900/70 border-slate-700/60 text-slate-300'
+                      : 'bg-slate-50 border-slate-200 text-slate-700'
+                  }`}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full shrink-0"
+                    style={{ backgroundColor: ev.color }}
+                  />
+                  <span className="font-mono font-bold tabular-nums text-[10px] text-slate-500">
+                    Age {ev.age} ({ev.year})
+                  </span>
+                  <span>{ev.title}</span>
+                  {typeof ev.amount === 'number' && ev.amount !== 0 && (
+                    <span className={`font-mono font-bold tabular-nums ${ev.amount > 0 ? 'text-emerald-500' : 'text-rose-500'}`}>
+                      {ev.amount > 0 ? '+' : '-'}{formatCurrency(Math.abs(ev.amount), data.baseCurrency)}
+                    </span>
+                  )}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Allocation and FI/RE Crossover Side-by-Side */}
