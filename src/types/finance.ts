@@ -128,6 +128,7 @@ export interface FinancialState {
   assets: Asset[];
   investments: Investment[];
   taxConfig: TaxConfig;
+  currencyChangeRates?: Record<string, number>;
 }
 
 export const CURRENCIES = ['USD', 'EUR', 'GBP', 'JPY', 'CAD', 'AUD', 'CHF', 'CNY', 'INR', 'AED', 'SGD', 'NZD'];

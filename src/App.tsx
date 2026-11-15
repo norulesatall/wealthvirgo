@@ -33,7 +33,9 @@ import {
   ArrowRight,
   MessageSquareText,
   Sparkles,
-  Receipt
+  Receipt,
+  Globe,
+  Calendar
 } from 'lucide-react';
 import { Chart, registerables } from 'chart.js';
 import { motion, AnimatePresence } from 'motion/react';
@@ -73,7 +75,8 @@ const DEFAULT_STATE: FinancialState = {
   goals: [],
   assets: [],
   investments: [],
-  taxConfig: DEFAULT_TAX_CONFIG
+  taxConfig: DEFAULT_TAX_CONFIG,
+  currencyChangeRates: {}
 };
 
 // --- HELPER MATH FUNCTIONS ---
@@ -84,6 +87,24 @@ const safeFloat = (val: any) => {
 
 const formatCurrency = (amount: number, currency: string) => {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: currency, maximumFractionDigits: 0 }).format(amount);
+};
+
+const getUsedForeignCurrencies = (state: FinancialState): string[] => {
+  const base = state.baseCurrency;
+  const used = new Set<string>();
+  const collect = (currency?: string) => {
+    if (currency && currency !== base) {
+      used.add(currency);
+    }
+  };
+  (state.incomes || []).forEach((i) => collect(i.currency));
+  (state.expenses || []).forEach((e) => collect(e.currency));
+  (state.retirementExpenses || []).forEach((r) => collect(r.currency));
+  (state.goals || []).forEach((g) => collect(g.currency));
+  (state.assets || []).forEach((a) => collect(a.currency));
+  (state.investments || []).forEach((inv) => collect(inv.currency));
+  (state.taxConfig?.deductions || []).forEach((d) => collect(d.currency));
+  return Array.from(used).sort();
 };
 
 const NAV_ITEMS = [
@@ -149,7 +170,18 @@ export default function App() {
   // --- LOGIC: PROJECTION ENGINE ---
   const projection = useMemo(() => {
     const currentYear = new Date().getFullYear();
-    
+
+    const getCurrencyMultiplier = (currency: string, yearIndex: number) => {
+      if (!currency || currency === data.baseCurrency || yearIndex <= 0) return 1;
+      const annualChange = safeFloat(data.currencyChangeRates?.[currency] ?? 0);
+      if (annualChange === 0) return 1;
+      return Math.pow(Math.max(0.05, 1 + annualChange / 100), yearIndex);
+    };
+
+    const convertToBaseAtYear = (amount: number, currency: string, yearIndex: number) => {
+      return convertToBase(amount, currency) * getCurrencyMultiplier(currency, yearIndex);
+    };
+
     // Normalize pre-retirement flows
     const getFrequencyMultiplier = (f: string) => {
       switch (f) {
@@ -161,51 +193,72 @@ export default function App() {
       }
     };
 
-    let liquidAssets = 0;
+    let liquidBaseAssets = 0;
+    const liquidForeignHoldings: Record<string, number> = {};
+    const addLiquidHolding = (nativeAmount: number, currency: string) => {
+      const amt = safeFloat(nativeAmount);
+      if (amt === 0) return;
+      if (!currency || currency === data.baseCurrency) {
+        liquidBaseAssets += amt;
+      } else {
+        liquidForeignHoldings[currency] = (liquidForeignHoldings[currency] || 0) + amt;
+      }
+    };
+
+    const getLiquidAssetsBaseAtYear = (yearIndex: number, basePool: number) => {
+      let total = basePool;
+      Object.entries(liquidForeignHoldings).forEach(([curr, nativeAmt]) => {
+        if (nativeAmt !== 0) {
+          total += convertToBaseAtYear(nativeAmt, curr, yearIndex);
+        }
+      });
+      return total;
+    };
+
     const currentMonth = new Date().getMonth() + 1; // 1-12
 
-    // Normalize Investments (Growth Portfolios)
+    // Normalize Investments (Growth Portfolios) in native currency for accurate FX projection
     let activeInvestments: any[] = [];
     (data.investments || []).forEach(inv => {
-      const baseBalance = convertToBase(inv.currentBalance, inv.currency);
-      const baseContribution = convertToBase(inv.contribution || 0, inv.currency);
+      const nativeBalance = safeFloat(inv.currentBalance);
+      const nativeContribution = safeFloat(inv.contribution || 0);
       const maturityYear = safeFloat(inv.maturityYear) || currentYear;
-      
+
       if (maturityYear <= currentYear) {
-        // Option "Liquid / Current" or in past -> immediately liquid cash!
-        liquidAssets += baseBalance;
+        // Option "Liquid / Current" or in past -> immediately liquid holding
+        addLiquidHolding(nativeBalance, inv.currency);
       } else {
         activeInvestments.push({
           ...inv,
-          baseBalance,
-          baseContribution,
+          nativeBalance,
+          nativeContribution,
           frequency: inv.contributionFrequency || 'None',
           maturityYear
         });
       }
     });
 
-    // Normalize static assets and Real Estate / Insurance (Scenario 1 & 2)
+    // Normalize static assets and Real Estate / Insurance (Scenario 1 & 2) in native currency
     const futureAssets = (data.assets || []).map(a => {
       const maturityYear = safeFloat(a.maturityYear) || currentYear;
       const maturityMonth = safeFloat(a.maturityMonth) || 12;
       const isMaturityPortfolio = a.valueMode === 'Real Estate & Insurance' || a.valueMode === 'Final Value at Maturity';
       const isStaticAsset = a.valueMode === 'Asset Inventory' || !a.valueMode;
-      
-      const isAlreadyMatured = isStaticAsset || (maturityYear < currentYear || (maturityYear === currentYear && maturityMonth <= currentMonth));
-      
-      const baseAmount = isAlreadyMatured 
-        ? convertToBase(a.amount, a.currency)
-        : (isMaturityPortfolio ? convertToBase(a.currentInvestment || 0, a.currency) : convertToBase(a.amount, a.currency));
 
-      const baseContribution = convertToBase(a.contribution || 0, a.currency);
-      
+      const isAlreadyMatured = isStaticAsset || (maturityYear < currentYear || (maturityYear === currentYear && maturityMonth <= currentMonth));
+
+      const nativeAmount = isAlreadyMatured
+        ? safeFloat(a.amount)
+        : (isMaturityPortfolio ? safeFloat(a.currentInvestment || 0) : safeFloat(a.amount));
+
+      const nativeContribution = safeFloat(a.contribution || 0);
+
       return {
         ...a,
         maturityYear,
         maturityMonth,
-        baseAmount,
-        baseContribution,
+        nativeAmount,
+        nativeContribution,
         isMaturityPortfolio,
         contributionFrequency: a.contributionFrequency || 'None'
       };
@@ -213,15 +266,21 @@ export default function App() {
       const isStaticAsset = a.valueMode === 'Asset Inventory' || !a.valueMode;
       const isAlreadyMatured = isStaticAsset || (a.maturityYear < currentYear || (a.maturityYear === currentYear && a.maturityMonth <= currentMonth));
       if (isAlreadyMatured) {
-        liquidAssets += a.baseAmount;
+        addLiquidHolding(a.nativeAmount, a.currency);
         return false;
       }
       return true;
     });
 
-    let totalExpensesBase = (data.expenses || []).reduce((s, e) => s + convertToBase(e.amount * getFrequencyMultiplier(e.frequency), e.currency), 0);
+    const getBaselineExpensesAtYear = (yearIndex: number) =>
+      (data.expenses || []).reduce(
+        (s, e) => s + convertToBaseAtYear(e.amount * getFrequencyMultiplier(e.frequency), e.currency, yearIndex),
+        0
+      );
 
-    const getYearlyIncomeInflow = (targetYear: number, isRetired: boolean) => {
+    const totalExpensesBase = getBaselineExpensesAtYear(0);
+
+    const getYearlyIncomeInflow = (targetYear: number, isRetired: boolean, yearIndex: number) => {
       let activeIncomeSum = 0;
       (data.incomes || []).forEach((inc: any) => {
         const startYear = safeFloat(inc.startYear);
@@ -231,13 +290,13 @@ export default function App() {
         const isAfterEnd = endYear > 0 ? targetYear > endYear : isRetired;
 
         if (!isBeforeStart && !isAfterEnd) {
-          activeIncomeSum += convertToBase(inc.amount * getFrequencyMultiplier(inc.frequency), inc.currency);
+          activeIncomeSum += convertToBaseAtYear(inc.amount * getFrequencyMultiplier(inc.frequency), inc.currency, yearIndex);
         }
       });
       return activeIncomeSum;
     };
 
-    const getYearlyExpenseOutlay = (targetYear: number, isRetired: boolean) => {
+    const getYearlyExpenseOutlay = (targetYear: number, isRetired: boolean, yearIndex: number) => {
       let activeExpensesSum = 0;
       (data.expenses || []).forEach((e: any) => {
         const eStartYear = safeFloat(e.startYear);
@@ -261,35 +320,43 @@ export default function App() {
 
         if (activeMonths > 0) {
           const yearMult = getFrequencyMultiplier(e.frequency) * (activeMonths / 12);
-          activeExpensesSum += convertToBase(e.amount * yearMult, e.currency);
+          activeExpensesSum += convertToBaseAtYear(e.amount * yearMult, e.currency, yearIndex);
         }
       });
       return activeExpensesSum;
     };
 
-    const activeGoals = (data.goals || []).map(g => ({
-       ...g,
-       baseAmount: convertToBase(g.amount, g.currency)
-    }));
+    const activeGoals = (data.goals || []).map(g => ({ ...g }));
 
-    // Normalize post-retirement flows
-    let totalRetirementMonthlyBase = (data.retirementExpenses || [])
-      .filter(e => e.type !== 'Lump Sum')
-      .reduce((s, e) => s + convertToBase(e.amount * getFrequencyMultiplier(e.type), e.currency), 0);
-    
-    let totalRetirementLumpSumBase = (data.retirementExpenses || [])
-      .filter(e => e.type === 'Lump Sum')
-      .reduce((s, e) => s + convertToBase(e.amount, e.currency), 0);
+    // Normalize post-retirement flows dynamically by yearIndex for FX projection
+    const getRetirementMonthlyAtYear = (yearIndex: number) =>
+      (data.retirementExpenses || [])
+        .filter(e => e.type !== 'Lump Sum')
+        .reduce((s, e) => s + convertToBaseAtYear(e.amount * getFrequencyMultiplier(e.type), e.currency, yearIndex), 0);
+
+    const getRetirementLumpSumAtYear = (yearIndex: number) =>
+      (data.retirementExpenses || [])
+        .filter(e => e.type === 'Lump Sum')
+        .reduce((s, e) => s + convertToBaseAtYear(e.amount, e.currency, yearIndex), 0);
+
+    const totalRetirementMonthlyBase = getRetirementMonthlyAtYear(0);
 
     const truncateLabel = (txt: string, max = 14) =>
       txt && txt.length > max ? txt.slice(0, max - 1) + '…' : (txt || '');
 
     const yearlyData: any[] = [];
-    let rollingBaseAssets = liquidAssets;
+    let rollingBaseAssets = liquidBaseAssets;
     let activeFutureAssets = [...futureAssets];
     let runwayEnded = false;
     let runwayYears = 0;
     let combinedPoolAtRetirement = 0;
+
+    let prevTotalNominal = Math.max(
+      0,
+      getLiquidAssetsBaseAtYear(0, rollingBaseAssets) +
+        activeInvestments.reduce((s, i) => s + convertToBaseAtYear(i.nativeBalance, i.currency, 0), 0) +
+        activeFutureAssets.reduce((s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, 0), 0)
+    );
 
     for (let age = data.currentAge; age <= data.lifeExpectancy; age++) {
       const yearIndex = age - data.currentAge;
@@ -307,32 +374,37 @@ export default function App() {
         color: string;
       }> = [];
 
-      const startFutureAssetSum = activeFutureAssets.reduce((s, a) => s + a.baseAmount, 0);
-      const startInvSum = activeInvestments.reduce((s, i) => s + i.baseBalance, 0);
-      const startNominal = Math.max(0, rollingBaseAssets + startInvSum + startFutureAssetSum);
-      
-      let currentYearExpense = isRetired 
-        ? (totalRetirementMonthlyBase + getYearlyExpenseOutlay(targetYear, true)) * inflationMultiplier 
-        : getYearlyExpenseOutlay(targetYear, false) * inflationMultiplier;
-      
-      let currentYearGrossIncome = getYearlyIncomeInflow(targetYear, isRetired) * incomeMultiplier;
+      const startNominal = prevTotalNominal;
+      const retirementMonthlyAtYear = getRetirementMonthlyAtYear(yearIndex);
+
+      let currentYearExpense = isRetired
+        ? (retirementMonthlyAtYear + getYearlyExpenseOutlay(targetYear, true, yearIndex)) * inflationMultiplier
+        : getYearlyExpenseOutlay(targetYear, false, yearIndex) * inflationMultiplier;
+
+      let currentYearGrossIncome = getYearlyIncomeInflow(targetYear, isRetired, yearIndex) * incomeMultiplier;
       const shouldTaxThisYear = !isRetired || (data.taxConfig?.taxRetirementIncome !== false);
       const taxBreakdown = shouldTaxThisYear
-        ? calculateAnnualTax(currentYearGrossIncome, data.taxConfig, convertToBase, inflationMultiplier)
+        ? calculateAnnualTax(
+            currentYearGrossIncome,
+            data.taxConfig,
+            (amt, curr) => convertToBaseAtYear(amt, curr, yearIndex),
+            inflationMultiplier
+          )
         : null;
       let currentYearTax = taxBreakdown ? taxBreakdown.totalTax : 0;
       let currentYearIncome = taxBreakdown ? taxBreakdown.netIncome : currentYearGrossIncome;
       let currentYearGoalExpense = 0;
 
-      // 1. Calculate Goals (PV to Nominal)
+      // 1. Calculate Goals (PV to Nominal using projected FX rate for targetYear)
       if (!isRetired) {
         activeGoals.forEach((goal: any) => {
           const start = safeFloat(goal.startYear);
           const end = safeFloat(goal.endYear) || start;
           if (targetYear >= start) {
+            const goalBaseAtYear = convertToBaseAtYear(goal.amount, goal.currency, yearIndex);
             if (goal.frequency === 'Lump Sum') {
               if (targetYear === start) {
-                const nominalCost = goal.baseAmount * inflationMultiplier;
+                const nominalCost = goalBaseAtYear * inflationMultiplier;
                 currentYearGoalExpense += nominalCost;
                 yearEvents.push({
                   type: 'goal',
@@ -343,7 +415,7 @@ export default function App() {
                 });
               }
             } else if (targetYear <= end) {
-              const annualGoalCost = (goal.baseAmount * getFrequencyMultiplier(goal.frequency)) * inflationMultiplier;
+              const annualGoalCost = (goalBaseAtYear * getFrequencyMultiplier(goal.frequency)) * inflationMultiplier;
               currentYearGoalExpense += annualGoalCost;
               if (targetYear === start) {
                 yearEvents.push({
@@ -409,9 +481,9 @@ export default function App() {
       // 2. Asset Maturity Check (processes for both working years and retirement years!)
       activeFutureAssets = activeFutureAssets.filter(asset => {
         if (targetYear >= asset.maturityYear) {
-          const payout = asset.isMaturityPortfolio 
-            ? convertToBase(asset.amount, asset.currency)
-            : asset.baseAmount;
+          const payout = asset.isMaturityPortfolio
+            ? convertToBaseAtYear(asset.amount, asset.currency, yearIndex)
+            : convertToBaseAtYear(asset.nativeAmount, asset.currency, yearIndex);
           maturedSum += payout;
           yearEvents.push({
             type: 'maturity',
@@ -422,74 +494,82 @@ export default function App() {
           });
           return false;
         }
-        
+
         if (!asset.isMaturityPortfolio) {
           // Annual appreciation happens at year end for standard assets (if any)
-          asset.baseAmount *= (1 + (safeFloat(asset.yield) / 100));
+          asset.nativeAmount *= (1 + (safeFloat(asset.yield) / 100));
         } else {
           // Maturity Portfolio / Real Estate & Insurance contribution logic
           const lastPayYear = safeFloat(asset.lastPaymentYear) || asset.maturityYear;
           const lastPayMonth = safeFloat(asset.lastPaymentMonth) !== 0 ? safeFloat(asset.lastPaymentMonth) : asset.maturityMonth;
+          let assetContributionNative = 0;
 
           for (let m = 0; m < 12; m++) {
             const monthOfSimulation = m + 1;
-            const withinPaymentPeriod = (targetYear < lastPayYear) || 
-                                         (targetYear === lastPayYear && monthOfSimulation <= lastPayMonth);
-            
-            let contributionStep = 0;
+            const withinPaymentPeriod = (targetYear < lastPayYear) ||
+              (targetYear === lastPayYear && monthOfSimulation <= lastPayMonth);
+
+            let contributionStepNative = 0;
             if (withinPaymentPeriod) {
               if (asset.contributionFrequency === 'Monthly') {
-                contributionStep = asset.baseContribution;
+                contributionStepNative = asset.nativeContribution;
               } else if (asset.contributionFrequency === 'Quarterly' && m % 3 === 0) {
-                contributionStep = asset.baseContribution;
+                contributionStepNative = asset.nativeContribution;
               } else if (asset.contributionFrequency === 'Semi-Yearly' && (m === 0 || m === 6)) {
-                contributionStep = asset.baseContribution;
+                contributionStepNative = asset.nativeContribution;
               } else if (asset.contributionFrequency === 'Yearly' && m === 0) {
-                contributionStep = asset.baseContribution;
+                contributionStepNative = asset.nativeContribution;
               }
-              yearlyContributionTotal += contributionStep;
-              asset.baseAmount += contributionStep;
+              assetContributionNative += contributionStepNative;
+              asset.nativeAmount += contributionStepNative;
             }
           }
+          yearlyContributionTotal += convertToBaseAtYear(assetContributionNative, asset.currency, yearIndex);
         }
         return true;
       });
+
+      const lumpSumRetirement = isFirstYearRetirement ? getRetirementLumpSumAtYear(yearIndex) * inflationMultiplier : 0;
 
       if (!isRetired) {
         // 3. Investment Growth & Contributions (Only pre-retirement)
         activeInvestments.forEach((inv: any) => {
           const maturityYear = safeFloat(inv.maturityYear) || 9999;
           const rateMonthly = (safeFloat(inv.expectedReturn) / 100) / 12;
-          
+          let invContributionNative = 0;
+
           for (let m = 0; m < 12; m++) {
             const monthOfSimulation = m + 1;
-            const canContribute = (targetYear < (safeFloat(inv.lastContributionYear) || maturityYear)) || 
-                               (targetYear === (safeFloat(inv.lastContributionYear) || maturityYear) && monthOfSimulation <= (inv.lastContributionMonth || 12));
-            
-            let contributionStep = 0;
+            const canContribute = (targetYear < (safeFloat(inv.lastContributionYear) || maturityYear)) ||
+              (targetYear === (safeFloat(inv.lastContributionYear) || maturityYear) && monthOfSimulation <= (inv.lastContributionMonth || 12));
+
+            let contributionStepNative = 0;
             if (canContribute) {
-              if (inv.frequency === 'Monthly') contributionStep = inv.baseContribution;
-              else if (inv.frequency === 'Quarterly' && m % 3 === 0) contributionStep = inv.baseContribution;
-              else if (inv.frequency === 'Semi-Yearly' && (m === 0 || m === 6)) contributionStep = inv.baseContribution;
-              else if (inv.frequency === 'Yearly' && m === 0) contributionStep = inv.baseContribution;
+              if (inv.frequency === 'Monthly') contributionStepNative = inv.nativeContribution;
+              else if (inv.frequency === 'Quarterly' && m % 3 === 0) contributionStepNative = inv.nativeContribution;
+              else if (inv.frequency === 'Semi-Yearly' && (m === 0 || m === 6)) contributionStepNative = inv.nativeContribution;
+              else if (inv.frequency === 'Yearly' && m === 0) contributionStepNative = inv.nativeContribution;
             }
-            
-            inv.baseBalance = (inv.baseBalance * (1 + rateMonthly)) + contributionStep;
-            yearlyContributionTotal += contributionStep;
+
+            inv.nativeBalance = (inv.nativeBalance * (1 + rateMonthly)) + contributionStepNative;
+            invContributionNative += contributionStepNative;
           }
 
+          yearlyContributionTotal += convertToBaseAtYear(invContributionNative, inv.currency, yearIndex);
+
           if (targetYear >= maturityYear) {
-            maturedSum += inv.baseBalance;
+            const maturedBase = convertToBaseAtYear(inv.nativeBalance, inv.currency, yearIndex);
+            maturedSum += maturedBase;
             yearEvents.push({
               type: 'maturity',
               title: `Portfolio Matures: ${inv.name}`,
               shortLabel: `Matures: ${truncateLabel(inv.name)}`,
-              amount: inv.baseBalance,
+              amount: maturedBase,
               color: '#10b981'
             });
             inv.matured = true;
           } else {
-            yearEndInvSum += inv.baseBalance;
+            yearEndInvSum += convertToBaseAtYear(inv.nativeBalance, inv.currency, yearIndex);
           }
         });
 
@@ -498,10 +578,15 @@ export default function App() {
       } else {
         // 4. Retirement Phase Transition & Depletion
         if (isFirstYearRetirement) {
-          const finalInvSum = activeInvestments.reduce((s, i) => s + i.baseBalance, 0);
-          rollingBaseAssets += finalInvSum - (totalRetirementLumpSumBase * inflationMultiplier);
-          activeInvestments.forEach(inv => inv.baseBalance = 0);
-          combinedPoolAtRetirement = rollingBaseAssets / inflationMultiplier;
+          const finalInvSum = activeInvestments.reduce(
+            (s, i) => s + convertToBaseAtYear(i.nativeBalance, i.currency, yearIndex),
+            0
+          );
+          rollingBaseAssets += finalInvSum - lumpSumRetirement;
+          activeInvestments.forEach(inv => {
+            inv.nativeBalance = 0;
+          });
+          combinedPoolAtRetirement = getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) / inflationMultiplier;
 
           yearEvents.push({
             type: 'retirement',
@@ -513,7 +598,7 @@ export default function App() {
           (data.retirementExpenses || [])
             .filter(re => re.type === 'Lump Sum')
             .forEach(re => {
-              const lumpAmt = convertToBase(re.amount, re.currency) * inflationMultiplier;
+              const lumpAmt = convertToBaseAtYear(re.amount, re.currency, yearIndex) * inflationMultiplier;
               yearEvents.push({
                 type: 'lump_sum',
                 title: `Retirement Lump Sum: ${re.name}`,
@@ -526,12 +611,38 @@ export default function App() {
 
         const postRetirementYield = safeFloat(data.postRetirementReturn) / 100;
         rollingBaseAssets = (rollingBaseAssets * (1 + postRetirementYield)) + currentYearIncome - currentYearExpense;
-        
+        Object.keys(liquidForeignHoldings).forEach((curr) => {
+          liquidForeignHoldings[curr] = liquidForeignHoldings[curr] * (1 + postRetirementYield);
+        });
+
         // Add matured assets and deduct remaining premium/contributions payments in retirement too
         rollingBaseAssets += maturedSum - yearlyContributionTotal;
 
-        if (rollingBaseAssets <= 0) {
+        // If base cash pool drops negative, draw down foreign-currency liquid holdings at this year's projected FX rate
+        if (rollingBaseAssets < 0) {
+          let deficitBase = -rollingBaseAssets;
+          for (const curr of Object.keys(liquidForeignHoldings)) {
+            const nativeAmt = liquidForeignHoldings[curr];
+            if (nativeAmt > 0 && deficitBase > 0) {
+              const holdingBase = convertToBaseAtYear(nativeAmt, curr, yearIndex);
+              if (holdingBase >= deficitBase) {
+                liquidForeignHoldings[curr] = nativeAmt * (1 - deficitBase / holdingBase);
+                deficitBase = 0;
+                break;
+              } else {
+                deficitBase -= holdingBase;
+                liquidForeignHoldings[curr] = 0;
+              }
+            }
+          }
+          rollingBaseAssets = deficitBase > 0 ? -deficitBase : 0;
+        }
+
+        if (getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) <= 0) {
           rollingBaseAssets = 0;
+          Object.keys(liquidForeignHoldings).forEach((curr) => {
+            liquidForeignHoldings[curr] = 0;
+          });
           if (!runwayEnded) {
             runwayEnded = true;
             runwayYears = age - data.retirementAge;
@@ -546,13 +657,25 @@ export default function App() {
         yearEndInvSum = 0;
       }
 
-      const futureAssetSum = activeFutureAssets.reduce((s, a) => s + a.baseAmount, 0);
-      const totalNominal = Math.max(0, rollingBaseAssets + yearEndInvSum + futureAssetSum);
+      const futureAssetSum = activeFutureAssets.reduce(
+        (s, a) => s + convertToBaseAtYear(a.nativeAmount, a.currency, yearIndex),
+        0
+      );
+      const totalNominal = Math.max(
+        0,
+        getLiquidAssetsBaseAtYear(yearIndex, rollingBaseAssets) + yearEndInvSum + futureAssetSum
+      );
 
-      const lumpSumRetirement = (age === data.retirementAge) ? (totalRetirementLumpSumBase * inflationMultiplier) : 0;
-      const netExternalFlow = isRetired ? (currentYearIncome - currentYearExpense - lumpSumRetirement) : (currentYearIncome - currentYearExpense - currentYearGoalExpense);
+      const targetCoreCost =
+        (retirementMonthlyAtYear > 0 ? retirementMonthlyAtYear : getBaselineExpensesAtYear(yearIndex)) *
+        inflationMultiplier;
+
+      const netExternalFlow = isRetired
+        ? (currentYearIncome - currentYearExpense - lumpSumRetirement)
+        : (currentYearIncome - currentYearExpense - currentYearGoalExpense);
       const actualChange = totalNominal - startNominal;
       const passiveGrowth = Math.max(0, actualChange - netExternalFlow);
+      prevTotalNominal = totalNominal;
 
       yearlyData.push({
         age,
@@ -560,6 +683,7 @@ export default function App() {
         nominal: totalNominal,
         real: totalNominal / inflationMultiplier,
         expense: currentYearExpense,
+        targetCoreCost,
         grossIncome: currentYearGrossIncome,
         tax: currentYearTax,
         income: currentYearIncome,
@@ -572,13 +696,10 @@ export default function App() {
     }
 
     // Mark FI Crossover Milestone on the first year where sustainable SWR income covers core expenses
-    const baseRetirementCostForFI = totalRetirementMonthlyBase > 0 ? totalRetirementMonthlyBase : totalExpensesBase;
     const swrRateFrac = safeFloat(data.safeWithdrawalRate || 4.0) / 100;
-    if (baseRetirementCostForFI > 0 && swrRateFrac > 0) {
+    if (swrRateFrac > 0) {
       const crossoverRow = yearlyData.find((row) => {
-        const yearIndex = row.age - data.currentAge;
-        const infMult = Math.pow(1 + safeFloat(data.inflationRate) / 100, yearIndex);
-        return row.nominal > 0 && (row.nominal * swrRateFrac) >= (baseRetirementCostForFI * infMult);
+        return row.targetCoreCost > 0 && row.nominal > 0 && (row.nominal * swrRateFrac) >= row.targetCoreCost;
       });
       if (crossoverRow) {
         crossoverRow.events.push({
@@ -686,7 +807,8 @@ export default function App() {
       setData({
         ...DEFAULT_STATE,
         ...decryptedData,
-        taxConfig: { ...DEFAULT_TAX_CONFIG, ...(decryptedData.taxConfig || {}) }
+        taxConfig: { ...DEFAULT_TAX_CONFIG, ...(decryptedData.taxConfig || {}) },
+        currencyChangeRates: { ...(decryptedData.currencyChangeRates || {}) }
       });
       setPasswordModal(null);
     } catch (err) {
@@ -696,7 +818,8 @@ export default function App() {
         setData({
           ...DEFAULT_STATE,
           ...importedData,
-          taxConfig: { ...DEFAULT_TAX_CONFIG, ...(importedData.taxConfig || {}) }
+          taxConfig: { ...DEFAULT_TAX_CONFIG, ...(importedData.taxConfig || {}) },
+          currencyChangeRates: { ...(importedData.currencyChangeRates || {}) }
         });
         setPasswordModal(null);
       } catch (legacyErr) {
@@ -840,7 +963,7 @@ export default function App() {
               {activeTab === 'tax' && <TaxTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
               {activeTab === 'goals' && <GoalsTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
               {activeTab === 'retirement' && <RetirementTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} projection={projection} />}
-              {activeTab === 'profile' && <ProfileTab data={data} updateData={updateData} theme={theme} />}
+              {activeTab === 'profile' && <ProfileTab data={data} updateData={updateData} theme={theme} exchangeRates={exchangeRates} />}
             </motion.div>
           </AnimatePresence>
 
@@ -1680,9 +1803,9 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
             {
               label: 'Target Retirement Core Costs',
               data: crossoverRows.map((d: any) => {
+                if (typeof d.targetCoreCost === 'number') return d.targetCoreCost;
                 const yearIndex = d.age - data.currentAge;
                 const inflationMultiplier = Math.pow(1 + safeFloat(data.inflationRate) / 100, yearIndex);
-                // Draw target post-retirement core expenses tracking inflation
                 return baseRetirementCost * inflationMultiplier;
               }),
               borderColor: '#f43f5e',
@@ -2375,7 +2498,7 @@ function DashboardTab({ data, projection, theme }: { data: any, projection: any,
   );
 }
 
-const ParameterInput = memo(({ label, help, value, min, max, step, suffix, onChange, theme }: any) => {
+const ParameterInput = memo(({ label, help, value, min, max, step, suffix, badge, helperText, onChange, theme }: any) => {
   const [inputValue, setInputValue] = useState(value.toString());
 
   useEffect(() => {
@@ -2409,9 +2532,9 @@ const ParameterInput = memo(({ label, help, value, min, max, step, suffix, onCha
   };
 
   return (
-    <div className="mb-8 group">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-2">
+    <div className="mb-7 group">
+      <div className="flex justify-between items-center gap-2 mb-3">
+        <div className="flex items-center gap-2 flex-wrap">
           <label className={`text-[10px] font-black uppercase tracking-widest ${theme === 'dark' ? 'text-slate-500 group-hover:text-slate-400' : 'text-slate-500 group-hover:text-slate-700'} transition-colors`}>
             {label}
           </label>
@@ -2420,8 +2543,17 @@ const ParameterInput = memo(({ label, help, value, min, max, step, suffix, onCha
               <HelpCircle size={12} className="text-slate-500 hover:text-indigo-400 transition-colors" />
             </Tooltip>
           )}
+          {badge && (
+            <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold font-mono tabular-nums border ${
+              theme === 'dark'
+                ? 'bg-indigo-500/10 text-indigo-300 border-indigo-500/20'
+                : 'bg-indigo-50 text-indigo-700 border-indigo-200/80'
+            }`}>
+              {badge}
+            </span>
+          )}
         </div>
-        <div className={`flex items-center gap-1 ${theme === 'dark' ? 'bg-slate-950/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'} px-3 py-1.5 rounded-xl border focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all`}>
+        <div className={`flex items-center gap-1 shrink-0 ${theme === 'dark' ? 'bg-slate-950/50 border-slate-700/50' : 'bg-slate-50 border-slate-200'} px-3 py-1.5 rounded-xl border focus-within:border-indigo-500/50 focus-within:ring-1 focus-within:ring-indigo-500/20 transition-all`}>
           <input 
             type="number"
             value={inputValue}
@@ -2444,6 +2576,11 @@ const ParameterInput = memo(({ label, help, value, min, max, step, suffix, onCha
           className={`w-full h-1.5 ${theme === 'dark' ? 'bg-slate-700' : 'bg-slate-200'} rounded-lg appearance-none cursor-pointer accent-indigo-500 hover:accent-indigo-400 transition-all`} 
         />
       </div>
+      {helperText && (
+        <p className={`mt-2 text-[11px] font-medium ${theme === 'dark' ? 'text-slate-400' : 'text-slate-500'}`}>
+          {helperText}
+        </p>
+      )}
     </div>
   );
 });
@@ -2702,8 +2839,51 @@ function Footer({ theme }: { theme: 'light' | 'dark' }) {
   );
 }
 
-function ProfileTab({ data, updateData, theme }: { data: any, updateData: any, theme: 'light' | 'dark' }) {
+function ProfileTab({
+  data,
+  updateData,
+  theme,
+  exchangeRates,
+}: {
+  data: FinancialState;
+  updateData: (key: string, value: any) => void;
+  theme: 'light' | 'dark';
+  exchangeRates: Record<string, number>;
+}) {
   const isDark = theme === 'dark';
+  const currentYear = new Date().getFullYear();
+  const yearsToRetirement = Math.max(0, (data.retirementAge || 0) - (data.currentAge || 0));
+  const yearsTotalHorizon = Math.max(0, (data.lifeExpectancy || 0) - (data.currentAge || 0));
+  const yearsInRetirement = Math.max(0, (data.lifeExpectancy || 0) - (data.retirementAge || 0));
+
+  const retirementYear = currentYear + yearsToRetirement;
+  const lifeExpectancyYear = currentYear + yearsTotalHorizon;
+
+  const foreignCurrencies = useMemo(() => getUsedForeignCurrencies(data), [data]);
+
+  const handleCurrentAgeChange = (nextAge: number) => {
+    updateData('currentAge', nextAge);
+    if (data.retirementAge < nextAge) {
+      updateData('retirementAge', nextAge);
+    }
+    if (data.lifeExpectancy < Math.max(data.retirementAge, nextAge)) {
+      updateData('lifeExpectancy', Math.max(data.retirementAge, nextAge));
+    }
+  };
+
+  const handleRetirementAgeChange = (nextRetireAge: number) => {
+    updateData('retirementAge', nextRetireAge);
+    if (data.lifeExpectancy < nextRetireAge) {
+      updateData('lifeExpectancy', nextRetireAge);
+    }
+  };
+
+  const handleCurrencyChangeRate = (currency: string, rate: number) => {
+    updateData('currencyChangeRates', {
+      ...(data.currencyChangeRates || {}),
+      [currency]: rate,
+    });
+  };
 
   return (
     <div className="space-y-8 max-w-7xl mx-auto">
@@ -2711,14 +2891,16 @@ function ProfileTab({ data, updateData, theme }: { data: any, updateData: any, t
         isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
       }`}>
         <div className="space-y-2 max-w-2xl">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <span className={`text-[10px] font-black uppercase tracking-widest ${
               isDark ? 'text-indigo-400' : 'text-indigo-600'
             }`}>
               Step 1 · Baseline Parameters
             </span>
             <span className="text-slate-400">·</span>
-            <span className="text-[11px] text-slate-500">Ages {data.currentAge} to {data.lifeExpectancy}</span>
+            <span className="text-[11px] text-slate-500">
+              Ages {data.currentAge} to {data.lifeExpectancy} ({currentYear}–{lifeExpectancyYear})
+            </span>
           </div>
           <h2 className={`text-lg md:text-xl font-bold tracking-tight ${
             isDark ? 'text-white' : 'text-slate-900'
@@ -2732,19 +2914,84 @@ function ProfileTab({ data, updateData, theme }: { data: any, updateData: any, t
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-        <div className={`${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'} p-6 md:p-8 rounded-3xl border transition-colors`}>
-          <div className="flex items-center gap-2 mb-6">
-            <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
-              <Settings size={18} />
+        <div className={`${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'} p-6 md:p-8 rounded-3xl border transition-colors flex flex-col justify-between`}>
+          <div>
+            <div className="flex items-center gap-2 mb-6">
+              <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+                <Settings size={18} />
+              </div>
+              <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Timeline Parameters
+              </h3>
             </div>
-            <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
-              Timeline Parameters
-            </h3>
+            <ParameterInput
+              label="Current Age"
+              help="Your age at the start of the projection."
+              value={data.currentAge}
+              min={18}
+              max={80}
+              step={1}
+              suffix=" yrs"
+              badge={`Year ${currentYear}`}
+              helperText={`Projection starts today in ${currentYear}.`}
+              onChange={handleCurrentAgeChange}
+              theme={theme}
+            />
+            <ParameterInput
+              label="Retirement Age"
+              help="The age at which you plan to stop working and start living off your assets."
+              value={data.retirementAge}
+              min={data.currentAge}
+              max={90}
+              step={1}
+              suffix=" yrs"
+              badge={`Year ${retirementYear}`}
+              helperText={yearsToRetirement === 0 ? `Retiring immediately in ${retirementYear}.` : `Targeted for ${retirementYear} (+${yearsToRetirement} yrs from today).`}
+              onChange={handleRetirementAgeChange}
+              theme={theme}
+            />
+            <ParameterInput
+              label="Life Expectancy"
+              help="The final age used for the projection. Calculations will run until this year."
+              value={data.lifeExpectancy}
+              min={data.retirementAge}
+              max={110}
+              step={1}
+              suffix=" yrs"
+              badge={`Year ${lifeExpectancyYear}`}
+              helperText={`Models through ${lifeExpectancyYear} (${yearsInRetirement} yrs post-retirement).`}
+              onChange={(v: number) => updateData('lifeExpectancy', v)}
+              theme={theme}
+            />
           </div>
-          <ParameterInput label="Current Age" help="Your age at the start of the projection." value={data.currentAge} min={18} max={80} step={1} suffix=" yrs" onChange={(v: number) => updateData('currentAge', v)} theme={theme} />
-          <ParameterInput label="Retirement Age" help="The age at which you plan to stop working and start living off your assets." value={data.retirementAge} min={data.currentAge} max={90} step={1} suffix=" yrs" onChange={(v: number) => updateData('retirementAge', v)} theme={theme} />
-          <ParameterInput label="Life Expectancy" help="The final age used for the projection. Calculations will run until this year." value={data.lifeExpectancy} min={data.retirementAge} max={110} step={1} suffix=" yrs" onChange={(v: number) => updateData('lifeExpectancy', v)} theme={theme} />
+
+          <div className={`mt-2 p-4 rounded-2xl border ${isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50 border-slate-200/80'}`}>
+            <div className="flex items-center gap-1.5 mb-3">
+              <Calendar size={13} className={isDark ? 'text-indigo-400' : 'text-indigo-600'} />
+              <span className={`text-[10px] font-black uppercase tracking-widest ${isDark ? 'text-slate-400' : 'text-slate-500'}`}>
+                Calendar Year Horizon
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <div>
+                <div className="text-[10px] font-semibold text-slate-500 uppercase">Start</div>
+                <div className={`text-sm font-black font-mono tabular-nums ${isDark ? 'text-white' : 'text-slate-900'}`}>{currentYear}</div>
+                <div className="text-[10px] text-slate-500">Age {data.currentAge}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-500 uppercase">Retire</div>
+                <div className={`text-sm font-black font-mono tabular-nums ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>{retirementYear}</div>
+                <div className="text-[10px] text-slate-500">Age {data.retirementAge}</div>
+              </div>
+              <div>
+                <div className="text-[10px] font-semibold text-slate-500 uppercase">Horizon End</div>
+                <div className={`text-sm font-black font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{lifeExpectancyYear}</div>
+                <div className="text-[10px] text-slate-500">Age {data.lifeExpectancy}</div>
+              </div>
+            </div>
+          </div>
         </div>
+
         <div className={`${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'} p-6 md:p-8 rounded-3xl border transition-colors`}>
           <div className="flex items-center gap-2 mb-6">
             <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
@@ -2760,6 +3007,115 @@ function ProfileTab({ data, updateData, theme }: { data: any, updateData: any, t
           <ParameterInput label="Safe Withdrawal Rate (SWR)" help="The annual percentage of your retirement nest egg that you plan to withdraw each year. Default is 4.0%." value={data.safeWithdrawalRate || 4.0} min={1} max={10} step={0.1} suffix="%" onChange={(v: number) => updateData('safeWithdrawalRate', v)} theme={theme} />
         </div>
       </div>
+
+      {foreignCurrencies.length > 0 && (
+        <div className={`${isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'} p-6 md:p-8 rounded-3xl border transition-colors`}>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+            <div className="flex items-start gap-3">
+              <div className={`p-2.5 rounded-xl shrink-0 ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-50 text-amber-600'}`}>
+                <Globe size={18} />
+              </div>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                    Currency Exchange Forecast
+                  </h3>
+                  <span className={`px-2 py-0.5 rounded-md text-[10px] font-bold uppercase tracking-wider border ${
+                    isDark
+                      ? 'bg-amber-500/10 text-amber-300 border-amber-500/20'
+                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                  }`}>
+                    vs {data.baseCurrency}
+                  </span>
+                </div>
+                <p className={`text-xs ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed max-w-3xl`}>
+                  Multiple currencies detected in your plan. Specify the expected annual percentage change of each currency relative to <strong className={isDark ? 'text-slate-200' : 'text-slate-800'}>{data.baseCurrency}</strong>. Positive (+) means the currency appreciates against {data.baseCurrency}; negative (−) means it depreciates. All projected cash flows, assets, and goals dynamically adjust each year.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className={`grid grid-cols-1 ${foreignCurrencies.length > 1 ? 'lg:grid-cols-2' : ''} gap-6`}>
+            {foreignCurrencies.map((curr) => {
+              const spotRate = exchangeRates[curr] || 1; // units of curr per 1 baseCurrency
+              const annualChange = safeFloat(data.currencyChangeRates?.[curr] ?? 0);
+              const unitNow = 1 / spotRate; // 1 curr in baseCurrency today
+              const factorRetire = Math.pow(Math.max(0.05, 1 + annualChange / 100), yearsToRetirement);
+              const factorEnd = Math.pow(Math.max(0.05, 1 + annualChange / 100), yearsTotalHorizon);
+              const unitRetire = unitNow * factorRetire;
+              const unitEnd = unitNow * factorEnd;
+              const spotRetire = spotRate / factorRetire;
+              const spotEnd = spotRate / factorEnd;
+
+              const directionBadge =
+                annualChange > 0
+                  ? `+${annualChange.toFixed(1)}% Stronger`
+                  : annualChange < 0
+                    ? `${annualChange.toFixed(1)}% Weaker`
+                    : 'Flat (0.0%)';
+
+              return (
+                <div
+                  key={curr}
+                  className={`p-5 rounded-2xl border ${
+                    isDark ? 'bg-slate-950/60 border-slate-800' : 'bg-slate-50/80 border-slate-200'
+                  }`}
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2.5 py-1 rounded-lg text-xs font-black font-mono ${
+                        isDark ? 'bg-slate-800 text-white' : 'bg-white text-slate-900 border border-slate-200'
+                      }`}>
+                        {curr} / {data.baseCurrency}
+                      </span>
+                      <span className="text-[11px] text-slate-500 font-medium">
+                        Spot: 1 {data.baseCurrency} = {spotRate.toFixed(4)} {curr}
+                      </span>
+                    </div>
+                  </div>
+
+                  <ParameterInput
+                    label={`Annual ${curr} Rate of Change vs ${data.baseCurrency}`}
+                    help={`Expected yearly % change in the value of 1 ${curr} expressed in ${data.baseCurrency}. For example, +2% means ${curr} gains 2% value per year relative to ${data.baseCurrency}.`}
+                    value={annualChange}
+                    min={-25}
+                    max={25}
+                    step={0.1}
+                    suffix="% / yr"
+                    badge={directionBadge}
+                    onChange={(v: number) => handleCurrencyChangeRate(curr, v)}
+                    theme={theme}
+                  />
+
+                  <div className={`grid grid-cols-3 gap-3 pt-3 border-t ${isDark ? 'border-slate-800' : 'border-slate-200/80'}`}>
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-500 uppercase">Today ({currentYear})</div>
+                      <div className={`text-xs font-bold font-mono tabular-nums ${isDark ? 'text-slate-200' : 'text-slate-800'}`}>
+                        1 {curr} = {unitNow.toFixed(3)} {data.baseCurrency}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">1 {data.baseCurrency} = {spotRate.toFixed(3)} {curr}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-500 uppercase">Retire ({retirementYear})</div>
+                      <div className={`text-xs font-bold font-mono tabular-nums ${isDark ? 'text-indigo-400' : 'text-indigo-600'}`}>
+                        1 {curr} = {unitRetire.toFixed(3)} {data.baseCurrency}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">1 {data.baseCurrency} = {spotRetire.toFixed(3)} {curr}</div>
+                    </div>
+                    <div>
+                      <div className="text-[10px] font-semibold text-slate-500 uppercase">End ({lifeExpectancyYear})</div>
+                      <div className={`text-xs font-bold font-mono tabular-nums ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>
+                        1 {curr} = {unitEnd.toFixed(3)} {data.baseCurrency}
+                      </div>
+                      <div className="text-[10px] text-slate-500 font-mono">1 {data.baseCurrency} = {spotEnd.toFixed(3)} {curr}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
