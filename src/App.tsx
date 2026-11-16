@@ -35,7 +35,8 @@ import {
   Sparkles,
   Receipt,
   Globe,
-  Calendar
+  Calendar,
+  BookOpen
 } from 'lucide-react';
 import { Chart, registerables } from 'chart.js';
 import { motion, AnimatePresence } from 'motion/react';
@@ -108,6 +109,7 @@ const getUsedForeignCurrencies = (state: FinancialState): string[] => {
 };
 
 const NAV_ITEMS = [
+  { id: 'guide', icon: BookOpen, label: 'Planning Guide' },
   { id: 'profile', icon: Settings, label: 'Parameters', step: 1 },
   { id: 'cashflow', icon: DollarSign, label: 'Cash Flow', step: 2 },
   { id: 'portfolio', icon: Briefcase, label: 'Portfolio', step: 3 },
@@ -119,7 +121,7 @@ const NAV_ITEMS = [
 
 export default function App() {
   // --- STATE ---
-  const [activeTab, setActiveTab] = useState('profile');
+  const [activeTab, setActiveTab] = useState('guide');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const mainRef = useRef<HTMLElement>(null);
   const [passwordModal, setPasswordModal] = useState<{ type: 'encrypt' | 'decrypt', fileData?: string } | null>(null);
@@ -1049,6 +1051,7 @@ export default function App() {
               transition={{ duration: 0.2 }}
               className="min-h-full"
             >
+              {activeTab === 'guide' && <GuideTab theme={theme} setActiveTab={handleTabChange} baseCurrency={data.baseCurrency} />}
               {activeTab === 'dashboard' && <DashboardTab data={data} projection={projection} theme={theme} />}
               {activeTab === 'cashflow' && <CashflowTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
               {activeTab === 'portfolio' && <PortfolioTab data={data} updateData={updateData} theme={theme} convertToBase={convertToBase} />}
@@ -2677,174 +2680,399 @@ const ParameterInput = memo(({ label, help, value, min, max, step, suffix, badge
   );
 });
 
-function GuideTab({ theme, setActiveTab }: { theme: 'light' | 'dark', setActiveTab: (tab: any) => void }) {
+function GuideTab({
+  theme,
+  setActiveTab,
+  baseCurrency,
+}: {
+  theme: 'light' | 'dark';
+  setActiveTab: (tab: any) => void;
+  baseCurrency: string;
+}) {
+  const isDark = theme === 'dark';
+
   const steps = [
     {
       num: '1',
-      title: 'Timeline & Forecast (Parameters)',
+      title: 'Parameters — Timeline, Economic Outlook & FX Rates',
       tabId: 'profile',
-      desc: 'Set up your baseline timeline. Input your Current Age, planned Retirement Age, and overall Life Expectancy. Set realistic assumptions for Inflation Rate, income adjustments, and expected yield.',
-      tip: '💡 Setting a higher inflation rate simulates conservative budgets, while expected yield determines your drawdown speed.'
+      icon: Settings,
+      accent: isDark ? 'bg-indigo-500/15 text-indigo-400 border-indigo-500/30' : 'bg-indigo-50 text-indigo-600 border-indigo-200',
+      summary: 'Define the timeline and macro rates that govern every year of your simulation.',
+      howToFill: [
+        'Choose your Base Currency in the bottom-left sidebar before entering numbers (you can still add items in other currencies later).',
+        'Set Current Age, Retirement Age, and Life Expectancy — the corresponding calendar years update automatically.',
+        'Adjust Annual Inflation, Income Growth (pre-retirement), Portfolio Return (post-retirement), and Safe Withdrawal Rate (SWR).',
+        'If any item in later tabs uses another currency, return here to enter its expected annual % FX rate change in the Currency Exchange Forecast card.'
+      ],
+      tip: 'Start with realistic conservative defaults (e.g. 2.5% inflation, 4.0% SWR) and stress-test later.'
     },
     {
       num: '2',
-      title: 'Monthly Cash Flow (Income & Expenses)',
+      title: 'Cash Flow — Pre-Retirement Income & Living Expenses',
       tabId: 'cashflow',
-      desc: 'List your current recurring pre-retirement revenue streams (salary, rent, dividend) and living expenses. This shapes your yearly working-years net budget.',
-      tip: '💡 Enter monthly living expenses like rent, utilities, and groceries. For expenses with specific end months or years, configure those optional end dates inside the Living Expenses section!'
+      icon: DollarSign,
+      accent: isDark ? 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30' : 'bg-emerald-50 text-emerald-600 border-emerald-200',
+      summary: 'Capture recurring earnings and living costs during your working years.',
+      howToFill: [
+        'Add salaries, bonuses, freelance revenue, or rental income under Income Streams with amount, frequency, and currency.',
+        'Use "Schedule Start / End Year" on an income when it begins in a future year or stops before retirement.',
+        'Add rent, mortgages, groceries, EMIs, and utilities under Living Expenses in today\'s value (inflation is applied automatically).',
+        'Enable optional Start & End Month/Year on temporary expenses (like car loans or school fees) so they stop automatically when paid off.'
+      ],
+      tip: 'Your net surplus (after tax and living expenses) automatically flows into your investable savings each year.'
     },
     {
       num: '3',
-      title: 'Financial Assets & Investments (Portfolio)',
+      title: 'Portfolio — Assets, Policies & Growth Investments',
       tabId: 'portfolio',
-      desc: 'Document your active portfolio ecosystem. Split into current static asset inventory (Cash, Gold, Real Estate) and Growth Portfolios/Brokerage accounts with regular contribution streams and expected yields.',
-      tip: '💡 Portfolio compounding is what fuels your long-term wealth curves.'
+      icon: Briefcase,
+      accent: isDark ? 'bg-sky-500/15 text-sky-400 border-sky-500/30' : 'bg-sky-50 text-sky-600 border-sky-200',
+      summary: 'Split your wealth across 3 scenarios based on how each holding behaves.',
+      howToFill: [
+        'Scenario 1 (Outright Assets): Enter property equity, gold, or cash you own outright today, plus its annual Appreciation % and Appreciation Start Year.',
+        'Scenario 2 (Maturity Policies): Enter installment plans or pre-construction property with ongoing premiums, Maturity Payout Value, Maturity Month/Year, and optional Post-Maturity Appreciation % (effective 1 year after maturity).',
+        'Scenario 3 (Growth Portfolios): Enter brokerage, index funds, or retirement accounts with current balance, ongoing contributions, expected CAGR %, contribution end date, and optional maturity year.'
+      ],
+      tip: 'Active Scenario 3 portfolios roll into your consolidated retirement pool at Retirement Age unless they mature earlier.'
     },
     {
       num: '4',
-      title: 'Pre-Retirement Milestones (Goals)',
-      tabId: 'goals',
-      desc: 'Specify any prospective capital outflows (down payments, vehicle replacement, study funds) before you stop working. These target precise future years.',
-      tip: '💡 Goals deduct directly from your liquid savings pool in their allocated year of occurrence.'
+      title: 'Tax — Income Tax Brackets, Deductions & Credits',
+      tabId: 'tax',
+      icon: Receipt,
+      accent: isDark ? 'bg-violet-500/15 text-violet-400 border-violet-500/30' : 'bg-violet-50 text-violet-600 border-violet-200',
+      summary: 'Model progressive or flat income taxes so projections reflect true take-home cash flow.',
+      howToFill: [
+        'Choose Progressive Brackets (enter min/max income slabs and rates) or switch to a single Flat Effective Rate.',
+        'Set Standard Deduction, Surcharge %, and Payroll/Social Tax if applicable in your country.',
+        'Add itemized Tax Deductions (reduce taxable income) or Tax Credits (reduce final tax bill directly).',
+        'Toggle whether brackets index with inflation each year and whether post-retirement income is taxed.'
+      ],
+      tip: 'Toggle Tax Modeling off anytime if your entered income amounts are already net after-tax.'
     },
     {
       num: '5',
-      title: 'Golden Years Budget (Retirement)',
+      title: 'Goals — Pre-Retirement Financial Milestones',
+      tabId: 'goals',
+      icon: TrendingUp,
+      accent: isDark ? 'bg-amber-500/15 text-amber-400 border-amber-500/30' : 'bg-amber-50 text-amber-600 border-amber-200',
+      summary: 'Plan major pre-retirement outflows such as home purchases, education, or travel.',
+      howToFill: [
+        'Enter the goal name and cost in today\'s value (the projection automatically compounds it with inflation up to its target year).',
+        'Choose Lump Sum for a one-off purchase in a specific Start Year, or Monthly/Quarterly/Yearly with a Start Year and End Year for multi-year commitments like university tuition.'
+      ],
+      tip: 'Every goal is deducted from your savings pool in its scheduled year and marked directly on Dashboard charts.'
+    },
+    {
+      num: '6',
+      title: 'Retirement — Post-Retirement Lifestyle & Lump Sums',
       tabId: 'retirement',
-      desc: 'Delineate your post-retirement comfortable living cost. Define monthly lifestyle budgets or one-time lump-sum retirement rewards (like travel, mortgage payoff).',
-      tip: '💡 Post-retirement monthly outlays automatically activate on your retirement year index, adjusting for lifetime compounding inflation.'
+      icon: History,
+      accent: isDark ? 'bg-rose-500/15 text-rose-400 border-rose-500/30' : 'bg-rose-50 text-rose-600 border-rose-200',
+      summary: 'Define your retirement budget and one-time payouts at retirement age.',
+      howToFill: [
+        'Enter your recurring post-retirement living costs (Monthly, Quarterly, or Yearly) in today\'s money — they activate at Retirement Age and track inflation.',
+        'Add one-time Retirement Lump Sums (e.g., world travel, final mortgage payoff, relocation) which trigger at the start of retirement.',
+        'Any working-years expenses without an end date automatically continue or pause cleanly based on your settings.'
+      ],
+      tip: 'Your remaining liquid pool compounds at Post-Retirement Portfolio Return while funding your retirement expenses.'
     }
   ];
 
   const results = [
     {
-      title: 'Liquid Net Worth Growth Curve',
-      desc: 'Shows how your lifetime capital compounds over time. Watch for the turning point on your retirement age mark, indicating when active savings stop and investment harvesting/drawdowns begin.'
+      title: 'Wealth Trajectory & Milestone Markers',
+      desc: 'Tracks nominal and inflation-adjusted (today\'s money) net worth from your current age through life expectancy, with labeled vertical markers for Goals, Asset Maturities, Cash Flow Changes, Retirement, Lump Sums, FI Crossover, and Depletion.'
     },
     {
-      title: 'Financial Independence Crossover Point',
-      desc: 'Look at the crossover intersection. This is the precise age where your passive portfolio yields safely cover 100% of your ongoing lifestyle and inflation-adjusted living expenses.'
+      title: 'Financial Independence (FI) Crossover',
+      desc: 'Shows the exact age when sustainable withdrawals (Net Worth × SWR%) exceed your inflation-adjusted retirement core costs.'
     },
     {
-      title: 'Compounding Investment Split',
-      desc: 'Visualizes the absolute strength of compound interest. It breaks down the total wealth slice into your self-funded principal versus growth from compounding interest.'
+      title: 'Principal vs. Compounding Split',
+      desc: 'Breaks down how much of your ending wealth came from direct savings and contributions versus passive investment growth.'
     },
     {
-      title: 'Runway Years & Capital Exhaustion',
-      desc: 'Instantly highlights if and when your portfolio runs out of balance during your retired twilight years. If your runway covers past your life expectancy, your plan is 100% safe!'
+      title: 'Retirement Runway & Export',
+      desc: 'Confirms whether your portfolio sustains your lifestyle through life expectancy, and lets you export a year-by-year CSV/Excel ledger.'
     }
   ];
 
   return (
-    <div className="max-w-7xl mx-auto space-y-10 animate-fade-in pb-12">
-      <div className={`${theme === 'dark' ? 'bg-indigo-950/10 border-indigo-505/20' : 'bg-indigo-50 border-indigo-100'} p-8 rounded-3xl border flex flex-col md:flex-row justify-between items-start md:items-center gap-6 shadow-sm`}>
-        <div className="space-y-2">
-          <h2 className={`text-2xl font-black tracking-tight ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-            Welcome to your Financial Blueprint Planner
-          </h2>
-          <p className={`text-xs md:text-sm ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} leading-relaxed max-w-3xl`}>
-            Follow this structured workbook methodology to model your path to early retirement. Each section layers variables onto our high-resolution projection engine to calculate precise timeline success rates.
-          </p>
-        </div>
-        <button
-          onClick={() => setActiveTab('dashboard')}
-          className="bg-indigo-600 hover:bg-indigo-500 text-white font-black text-xs uppercase px-5 py-3 rounded-2xl shadow-lg shadow-indigo-500/20 transition-all shrink-0 cursor-pointer"
-        >
-          Go to Dashboard
-        </button>
-      </div>
-
-
-      {/* Data Sovereignty & Privacy Banner Card */}
-      <div className={`${theme === 'dark' ? 'bg-emerald-950/15 border-emerald-500/20' : 'bg-emerald-50/40 border-emerald-100'} p-6 rounded-3xl border flex flex-col md:flex-row items-start gap-4 transition-colors duration-300`}>
-        <div className={`p-3 rounded-2xl ${theme === 'dark' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'} shrink-0`}>
-          <Shield size={22} />
-        </div>
-        <div className="space-y-1">
-          <h4 className={`text-sm font-black uppercase tracking-wider ${theme === 'dark' ? 'text-emerald-300' : 'text-emerald-800'}`}>
-            Data Privacy & Sovereignty Guard
-          </h4>
-          <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
-            We respect your financial secrets. <strong>Wealth Virgo does not store, collect, or transmit any of your personal information, active investments, or retirement profiles on our servers</strong>. Everything is secure and calculated 100% locally in your device's browser memory. You have absolute ownership of your financial blueprints: you can download your custom configuration file locally at any time and securely re-upload it to resume planning.
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-        {/* Left column: Inputs Checklist */}
-        <div className="lg:col-span-7 space-y-6">
-          <div className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center font-black text-sm select-none">
-              ✔
-            </span>
-            <h3 className={`text-lg font-black uppercase tracking-wider ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-              Checklist & Order of Input
-            </h3>
+    <div className="max-w-7xl mx-auto space-y-8 pb-6">
+      {/* Intro Hero Card */}
+      <div className={`p-6 md:p-8 rounded-3xl border transition-colors ${
+        isDark ? 'bg-slate-900/80 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+      }`}>
+        <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
+          <div className="space-y-2.5 max-w-3xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className={`text-[10px] font-black uppercase tracking-widest ${
+                isDark ? 'text-indigo-400' : 'text-indigo-600'
+              }`}>
+                Welcome · Complete Planning Workflow
+              </span>
+              <span className="text-slate-400">·</span>
+              <span className="text-[11px] text-slate-500">Base Currency: {baseCurrency}</span>
+            </div>
+            <h1 className={`text-xl md:text-2xl font-bold tracking-tight ${
+              isDark ? 'text-white' : 'text-slate-900'
+            }`}>
+              How to Build Your Financial & Retirement Blueprint
+            </h1>
+            <p className={`text-xs md:text-[13px] ${isDark ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+              Wealth Virgo simulates your entire financial timeline year by year—from today through retirement and life expectancy. Follow the <strong>6 numbered sections</strong> in order (or jump to any module below), enter values in <strong>today&apos;s purchasing power</strong>, and review live projections on the <strong>Dashboard</strong>.
+            </p>
           </div>
 
-          <div className="space-y-4 relative pl-4 border-l border-indigo-500/20 ml-4">
-            {steps.map((s, idx) => (
-              <div 
-                key={idx}
-                className={`${theme === 'dark' ? 'bg-slate-800/40 border-slate-700/50 hover:bg-slate-800/60' : 'bg-white border-slate-200 hover:bg-slate-50'} p-5 rounded-2xl border transition-all duration-200 relative group`}
-              >
-                {/* Number Badge */}
-                <span className="absolute -left-7 top-5 w-5 h-5 rounded-full bg-indigo-600 text-white flex items-center justify-center font-black text-[10px] shadow">
-                  {s.num}
-                </span>
+          <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <button
+              type="button"
+              onClick={() => setActiveTab('profile')}
+              className="inline-flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs px-5 py-2.5 rounded-xl shadow-lg shadow-indigo-500/20 transition-all cursor-pointer"
+            >
+              <span>Start Step 1: Parameters</span>
+              <ArrowRight size={14} />
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('dashboard')}
+              className={`inline-flex items-center gap-2 font-semibold text-xs px-4 py-2.5 rounded-xl border transition-all cursor-pointer ${
+                isDark
+                  ? 'bg-slate-800/70 border-slate-700 text-slate-200 hover:bg-slate-800'
+                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+              }`}
+            >
+              <LayoutDashboard size={14} />
+              <span>View Dashboard</span>
+            </button>
+          </div>
+        </div>
 
-                <div className="flex justify-between items-start gap-4">
-                  <div className="space-y-1.5">
-                    <h4 className={`text-xs md:text-sm font-black uppercase tracking-wider ${theme === 'dark' ? 'text-slate-200' : 'text-slate-800'}`}>
-                      {s.title}
-                    </h4>
-                    <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
-                      {s.desc}
-                    </p>
-                    <p className={`text-[11px] italic ${theme === 'dark' ? 'text-slate-500' : 'text-indigo-600/80'} leading-relaxed pt-1`}>
-                      {s.tip}
-                    </p>
-                  </div>
-                  
-                  <button
-                    onClick={() => setActiveTab(s.tabId)}
-                    className={`text-[10px] font-black uppercase px-3 py-1.5 rounded-lg border flex items-center gap-1 shrink-0 ${
-                      theme === 'dark'
-                      ? 'border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10'
-                      : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'
-                    } transition-all`}
-                  >
-                    Open <ArrowRight size={10} />
-                  </button>
-                </div>
-              </div>
+        {/* Visual 6-Step + Dashboard Flow Strip */}
+        <div className={`mt-6 pt-6 border-t ${isDark ? 'border-slate-800' : 'border-slate-100'}`}>
+          <div className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-3">
+            End-to-End Calculation Flow
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2.5">
+            {[
+              { id: 'profile', step: 'Step 1', name: 'Parameters', desc: 'Ages, Rates & FX' },
+              { id: 'cashflow', step: 'Step 2', name: 'Cash Flow', desc: 'Income & Expenses' },
+              { id: 'portfolio', step: 'Step 3', name: 'Portfolio', desc: 'Assets & Growth' },
+              { id: 'tax', step: 'Step 4', name: 'Tax', desc: 'Slabs & Reliefs' },
+              { id: 'goals', step: 'Step 5', name: 'Goals', desc: 'Life Milestones' },
+              { id: 'retirement', step: 'Step 6', name: 'Retirement', desc: 'Post-Work Budget' },
+              { id: 'dashboard', step: 'Output', name: 'Dashboard', desc: 'Charts & Runway' },
+            ].map((node) => (
+              <button
+                key={node.id}
+                type="button"
+                onClick={() => setActiveTab(node.id)}
+                className={`text-left p-3 rounded-2xl border transition-all cursor-pointer ${
+                  isDark
+                    ? 'bg-slate-950/60 border-slate-800 hover:border-indigo-500/40 hover:bg-slate-900'
+                    : 'bg-slate-50/80 border-slate-200/80 hover:border-indigo-300 hover:bg-indigo-50/40'
+                }`}
+              >
+                <span className={`text-[9px] font-black uppercase tracking-widest block ${
+                  node.id === 'dashboard'
+                    ? 'text-emerald-500'
+                    : isDark ? 'text-indigo-400' : 'text-indigo-600'
+                }`}>
+                  {node.step}
+                </span>
+                <span className={`text-xs font-bold block mt-0.5 ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                  {node.name}
+                </span>
+                <span className="text-[10px] text-slate-500 block truncate">{node.desc}</span>
+              </button>
             ))}
           </div>
         </div>
+      </div>
 
-        {/* Right column: Decode Results */}
-        <div className="lg:col-span-5 space-y-6">
-          <div className="flex items-center gap-3">
-            <span className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-500 flex items-center justify-center font-black text-sm select-none">
-              📊
-            </span>
-            <h3 className={`text-lg font-black uppercase tracking-wider ${theme === 'dark' ? 'text-white' : 'text-slate-900'}`}>
-              How to Decode Dashboard Results
+      {/* Key Rules & Privacy Strip */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className={`p-5 rounded-2xl border flex items-start gap-3 ${
+          isDark ? 'bg-emerald-950/15 border-emerald-500/20' : 'bg-emerald-50/50 border-emerald-200/80'
+        }`}>
+          <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-100 text-emerald-700'}`}>
+            <Shield size={17} />
+          </div>
+          <div className="space-y-1">
+            <h3 className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-emerald-300' : 'text-emerald-900'}`}>
+              100% Local Privacy
             </h3>
+            <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              All math runs strictly in your browser. Nothing is uploaded or stored on external servers.
+            </p>
+          </div>
+        </div>
+
+        <div className={`p-5 rounded-2xl border flex items-start gap-3 ${
+          isDark ? 'bg-indigo-950/15 border-indigo-500/20' : 'bg-indigo-50/50 border-indigo-200/80'
+        }`}>
+          <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-100 text-indigo-700'}`}>
+            <Sparkles size={17} />
+          </div>
+          <div className="space-y-1">
+            <h3 className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-indigo-300' : 'text-indigo-900'}`}>
+              Enter Today&apos;s Values
+            </h3>
+            <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Enter expenses, goals, and retirement budgets in today&apos;s prices—inflation and FX shifts apply automatically.
+            </p>
+          </div>
+        </div>
+
+        <div className={`p-5 rounded-2xl border flex items-start gap-3 ${
+          isDark ? 'bg-amber-950/15 border-amber-500/20' : 'bg-amber-50/50 border-amber-200/80'
+        }`}>
+          <div className={`p-2 rounded-xl shrink-0 ${isDark ? 'bg-amber-500/10 text-amber-400' : 'bg-amber-100 text-amber-700'}`}>
+            <Lock size={17} />
+          </div>
+          <div className="space-y-1">
+            <h3 className={`text-xs font-bold uppercase tracking-wider ${isDark ? 'text-amber-300' : 'text-amber-900'}`}>
+              Save & Resume Anytime
+            </h3>
+            <p className={`text-[11px] leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
+              Use <strong>Download</strong> in the sidebar to save a password-encrypted backup and <strong>Upload</strong> to restore it later.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Content: Step-by-step Form Guide + Dashboard Decoder */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        {/* Left column: Detailed Guide for Filling Each Section */}
+        <div className="lg:col-span-8 space-y-5">
+          <div className="flex items-center gap-2.5">
+            <div className={`p-2 rounded-xl ${isDark ? 'bg-indigo-500/10 text-indigo-400' : 'bg-indigo-50 text-indigo-600'}`}>
+              <CheckCircle2 size={18} />
+            </div>
+            <div>
+              <h2 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Section-by-Section Form Guide
+              </h2>
+              <p className="text-[11px] text-slate-500">
+                What to enter in each step and how those inputs affect your long-term forecast
+              </p>
+            </div>
           </div>
 
-          <div className={`${theme === 'dark' ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200 shadow-sm'} p-6 rounded-3xl border space-y-5 transition-colors`}>
+          <div className="space-y-4">
+            {steps.map((s) => {
+              const StepIcon = s.icon;
+              return (
+                <div
+                  key={s.num}
+                  className={`p-5 md:p-6 rounded-3xl border transition-colors ${
+                    isDark
+                      ? 'bg-slate-900/60 border-slate-800 hover:border-slate-700'
+                      : 'bg-white border-slate-200 shadow-sm hover:border-slate-300'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3">
+                    <div className="flex items-center gap-3">
+                      <span className={`w-8 h-8 rounded-xl border flex items-center justify-center font-mono font-black text-xs shrink-0 ${s.accent}`}>
+                        {s.num}
+                      </span>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <StepIcon size={14} className="text-slate-400 shrink-0" />
+                          <h3 className={`text-xs md:text-sm font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                            {s.title}
+                          </h3>
+                        </div>
+                        <p className="text-[11px] text-slate-500 mt-0.5">{s.summary}</p>
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab(s.tabId)}
+                      className={`text-[11px] font-semibold px-3 py-1.5 rounded-xl border inline-flex items-center gap-1.5 shrink-0 self-start sm:self-center cursor-pointer transition-all ${
+                        isDark
+                          ? 'border-indigo-500/30 text-indigo-400 hover:bg-indigo-500/10'
+                          : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'
+                      }`}
+                    >
+                      <span>Open Step {s.num}</span>
+                      <ArrowRight size={12} />
+                    </button>
+                  </div>
+
+                  <ul className="space-y-1.5 pl-1">
+                    {s.howToFill.map((line, i) => (
+                      <li
+                        key={i}
+                        className={`text-xs leading-relaxed flex items-start gap-2 ${
+                          isDark ? 'text-slate-300' : 'text-slate-600'
+                        }`}
+                      >
+                        <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 mt-1.5 shrink-0" />
+                        <span>{line}</span>
+                      </li>
+                    ))}
+                  </ul>
+
+                  <div className={`mt-3 pt-3 border-t text-[11px] font-medium ${
+                    isDark ? 'border-slate-800 text-indigo-300/90' : 'border-slate-100 text-indigo-700'
+                  }`}>
+                    Tip: {s.tip}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Right column: Understanding Dashboard Results */}
+        <div className="lg:col-span-4 space-y-5">
+          <div className="flex items-center gap-2.5">
+            <div className={`p-2 rounded-xl ${isDark ? 'bg-emerald-500/10 text-emerald-400' : 'bg-emerald-50 text-emerald-600'}`}>
+              <LayoutDashboard size={18} />
+            </div>
+            <div>
+              <h2 className={`text-sm md:text-base font-bold tracking-tight ${isDark ? 'text-white' : 'text-slate-900'}`}>
+                Reading the Dashboard
+              </h2>
+              <p className="text-[11px] text-slate-500">How your inputs turn into charts & KPIs</p>
+            </div>
+          </div>
+
+          <div className={`p-6 rounded-3xl border space-y-5 ${
+            isDark ? 'bg-slate-900/60 border-slate-800' : 'bg-white border-slate-200 shadow-sm'
+          }`}>
             {results.map((r, idx) => (
               <div key={idx} className="space-y-1.5">
-                <h4 className={`text-xs md:text-sm font-extrabold uppercase tracking-wide flex items-center gap-2 ${theme === 'dark' ? 'text-emerald-400' : 'text-emerald-600'}`}>
-                  ✨ {r.title}
-                </h4>
-                <p className={`text-xs ${theme === 'dark' ? 'text-slate-400' : 'text-slate-600'} leading-relaxed`}>
+                <h3 className={`text-xs font-bold uppercase tracking-wide ${
+                  isDark ? 'text-emerald-400' : 'text-emerald-600'
+                }`}>
+                  {idx + 1}. {r.title}
+                </h3>
+                <p className={`text-xs leading-relaxed ${isDark ? 'text-slate-400' : 'text-slate-600'}`}>
                   {r.desc}
                 </p>
-                {idx < results.length - 1 && <hr className={`${theme === 'dark' ? 'border-slate-800/50' : 'border-slate-100'} my-4`} />}
+                {idx < results.length - 1 && (
+                  <hr className={`${isDark ? 'border-slate-800' : 'border-slate-100'} my-3`} />
+                )}
               </div>
             ))}
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('dashboard')}
+              className={`w-full py-2.5 rounded-xl text-xs font-semibold border flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                isDark
+                  ? 'bg-slate-950/60 border-slate-700 text-slate-200 hover:border-emerald-500/50'
+                  : 'bg-slate-50 border-slate-200 text-slate-700 hover:border-emerald-400 hover:bg-emerald-50/40'
+              }`}
+            >
+              <LayoutDashboard size={14} />
+              <span>Preview Live Dashboard</span>
+            </button>
           </div>
         </div>
       </div>
